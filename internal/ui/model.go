@@ -189,6 +189,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Will be handled in rendering to set to max scroll
 				m.popupScrollPos = 999999
 				return m, nil
+			case key.Matches(msg, m.keys.Approve):
+				// Handle approve from popup
+				return m.handleApprove()
+			case key.Matches(msg, m.keys.View):
+				// Handle view from popup
+				return m.handleView()
+			case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
+				// Handle auto-merge from popup (will implement later)
+				slog.Debug("Auto-merge from popup requested (not implemented yet)")
+				return m, nil
 			}
 			return m, nil // Consume all other keys when popup is open
 		}
@@ -216,6 +226,11 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Refresh):
 			return m.handleRefresh()
+			
+		case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
+			// Handle auto-merge from main list (will implement later)
+			slog.Debug("Auto-merge from main list requested (not implemented yet)")
+			return m, nil
 		}
 
 	case spinner.TickMsg:
@@ -272,9 +287,9 @@ func (m Model) View() string {
 	// Help text
 	var help string
 	if m.showPopup {
-		help = helpStyle.Render("↑/k: scroll up • ↓/j: scroll down • pgup/pgdown: page • home/end: top/bottom • enter/esc: close")
+		help = helpStyle.Render("a: approve • v: view • m: auto-merge • ↑/j: scroll • pgup/pgdown: page • enter/esc: close")
 	} else {
-		help = helpStyle.Render("a: approve • s: skip • v: view • enter: details • f: toggle filter • r: refresh • q: quit")
+		help = helpStyle.Render("a: approve • s: skip • v: view • m: auto-merge • enter: details • f: filter • r: refresh • q: quit")
 	}
 
 	// Status with spinner if loading
@@ -442,23 +457,27 @@ func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 			// Check if current user has reviewed and determine review type
 			userReviewed := false
 			userApproved := false
+			userDismissed := false
 			for _, review := range msg.Reviews {
 				if review.User == m.username {
 					userReviewed = true
 					if review.State == "APPROVED" {
 						userApproved = true
+					} else if review.State == "DISMISSED" {
+						userDismissed = true
 					}
 					// Note: We don't break here because there might be multiple reviews
-					// and we want to find the most recent APPROVED status
+					// and we want to find the most recent status
 				}
 			}
 			
 			m.items[i].Reviewed = userReviewed
 			m.items[i].Approved = userApproved
+			m.items[i].Dismissed = userDismissed
 			
 			slog.Debug("Reviews loaded for PR", slog.Any("pr", m.items[i].PR), 
 				slog.Int("total_reviews", len(msg.Reviews)), slog.Bool("user_reviewed", userReviewed), 
-				slog.Bool("user_approved", userApproved), slog.Any("error", msg.Err))
+				slog.Bool("user_approved", userApproved), slog.Bool("user_dismissed", userDismissed), slog.Any("error", msg.Err))
 			
 			// Re-apply filter since review status may have changed
 			m = m.updateVisibleItems()
@@ -791,6 +810,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 	filteredCount := 0
 	reviewedCount := 0
 	approvedCount := 0
+	dismissedCount := 0
 	loadingCount := 0
 	
 	for _, item := range m.items {
@@ -803,6 +823,9 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		if item.Approved {
 			approvedCount++
 		}
+		if item.Dismissed {
+			dismissedCount++
+		}
 		if item.LoadingReviews {
 			loadingCount++
 		}
@@ -810,9 +833,10 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		if m.showOnlyUnreviewed {
 			// Show PR if:
 			// - Not reviewed AND not approved yet, OR
+			// - Review was dismissed (needs re-review), OR
 			// - Review status is still being loaded, OR  
 			// - It's the currently selected PR (prevent jarring disappearance)
-			shouldShow = (!item.Reviewed && !item.Approved) || item.LoadingReviews || 
+			shouldShow = (!item.Reviewed && !item.Approved) || item.Dismissed || item.LoadingReviews || 
 						 (selectedPRNumber > 0 && item.PR.Number == selectedPRNumber)
 		} else {
 			// Show all PRs
@@ -837,6 +861,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		slog.Int("filtered_out", filteredCount),
 		slog.Int("reviewed_count", reviewedCount),
 		slog.Int("approved_count", approvedCount),
+		slog.Int("dismissed_count", dismissedCount),
 		slog.Int("loading_count", loadingCount),
 		slog.Duration("duration", duration))
 	

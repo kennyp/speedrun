@@ -22,8 +22,9 @@ type PRItem struct {
 	LoadingAI       bool
 	
 	// Completion states
-	Approved bool
-	Reviewed bool // Has the current user reviewed this PR?
+	Approved  bool
+	Reviewed  bool // Has the current user reviewed this PR?
+	Dismissed bool // Has the current user's review been dismissed?
 	
 	// Errors
 	DiffError    error
@@ -37,6 +38,8 @@ func (i PRItem) Title() string {
 	status := "📊"
 	if i.Approved {
 		status = "✅"
+	} else if i.Dismissed {
+		status = "⚠️"  // Warning for dismissed reviews
 	} else if i.Reviewed {
 		status = "👀"
 	} else if i.AIAnalysis != nil {
