@@ -24,6 +24,7 @@ type GitHubConfig struct {
 
 // AIConfig holds AI/LLM configuration
 type AIConfig struct {
+	Enabled bool   // Should AI Reivew the PR
 	BaseURL string // LLM Gateway or API base URL
 	APIKey  string // API key for authentication
 	Model   string // Model to use (e.g., gpt-4)
@@ -55,6 +56,7 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 			SearchQuery: cmd.String("github-search-query"),
 		},
 		AI: AIConfig{
+			Enabled: cmd.Bool("ai-enabled"),
 			BaseURL: cmd.String("ai-base-url"),
 			APIKey:  cmd.String("ai-api-key"),
 			Model:   cmd.String("ai-model"),
@@ -111,3 +113,4 @@ func (c *Config) Validate() error {
 type OpClient interface {
 	Inject(ctx context.Context, template string) (string, error)
 }
+

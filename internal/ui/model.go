@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/spinner"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kennyp/speedrun/pkg/agent"
 	"github.com/kennyp/speedrun/pkg/config"
 	"github.com/kennyp/speedrun/pkg/github"
 )
@@ -41,6 +42,7 @@ type Model struct {
 	ctx      context.Context
 	config   *config.Config
 	github   *github.Client
+	aiAgent  *agent.Agent
 	username string
 	
 	list     list.Model
@@ -92,7 +94,7 @@ func DefaultKeyMap() KeyMap {
 }
 
 // NewModel creates a new TUI model
-func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Client, username string) Model {
+func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Client, aiAgent *agent.Agent, username string) Model {
 	// Create list
 	l := list.New([]list.Item{}, list.NewDefaultDelegate(), 0, 0)
 	l.Title = fmt.Sprintf("🔍 Pull Requests for %s", username)
@@ -109,6 +111,7 @@ func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Clie
 		ctx:      ctx,
 		config:   cfg,
 		github:   githubClient,
+		aiAgent:  aiAgent,
 		username: username,
 		list:     l,
 		items:    []PRItem{},
@@ -172,6 +175,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case ReviewsLoadedMsg:
 		return m.handleReviewsLoaded(msg)
 
+	case AIAnalysisLoadedMsg:
+		return m.handleAIAnalysisLoaded(msg)
+
 	case PRApprovedMsg:
 		return m.handlePRApproved(msg)
 
@@ -220,7 +226,9 @@ func (m Model) View() string {
 
 // renderPRDetails renders detailed information about a PR
 func (m Model) renderPRDetails(item PRItem) string {
-	if item.LoadingDiff || item.LoadingChecks || item.LoadingReviews {
+	// Only show loading if there are actual loading operations
+	stillLoading := item.LoadingDiff || item.LoadingChecks || item.LoadingReviews || item.LoadingAI
+	if stillLoading {
 		return "\n💭 Loading PR details..."
 	}
 
@@ -262,6 +270,7 @@ func (m Model) handlePRsLoaded(msg PRsLoadedMsg) (Model, tea.Cmd) {
 			LoadingDiff:    true,
 			LoadingChecks:  true,
 			LoadingReviews: true,
+			LoadingAI:      m.aiAgent != nil, // Only show AI loading if AI is enabled
 		}
 		items[i] = m.items[i]
 	}
@@ -302,7 +311,10 @@ func (m Model) handleDiffStatsLoaded(msg DiffStatsLoadedMsg) (Model, tea.Cmd) {
 			items := m.list.Items()
 			items[i] = m.items[i]
 			m.list.SetItems(items)
-			break
+			
+			// Trigger AI analysis if we have all required data and AI agent is available
+			cmd := m.triggerAIAnalysisIfReady(i)
+			return m, cmd
 		}
 	}
 	
@@ -321,7 +333,10 @@ func (m Model) handleCheckStatusLoaded(msg CheckStatusLoadedMsg) (Model, tea.Cmd
 			items := m.list.Items()
 			items[i] = m.items[i]
 			m.list.SetItems(items)
-			break
+			
+			// Trigger AI analysis if we have all required data and AI agent is available
+			cmd := m.triggerAIAnalysisIfReady(i)
+			return m, cmd
 		}
 	}
 	
@@ -343,6 +358,28 @@ func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 					break
 				}
 			}
+			
+			// Update list item
+			items := m.list.Items()
+			items[i] = m.items[i]
+			m.list.SetItems(items)
+			
+			// Trigger AI analysis if we have all required data and AI agent is available
+			cmd := m.triggerAIAnalysisIfReady(i)
+			return m, cmd
+		}
+	}
+	
+	return m, nil
+}
+
+func (m Model) handleAIAnalysisLoaded(msg AIAnalysisLoadedMsg) (Model, tea.Cmd) {
+	// Find the PR item
+	for i := range m.items {
+		if m.items[i].PR.Number == msg.PRNumber {
+			m.items[i].LoadingAI = false
+			m.items[i].AIAnalysis = msg.Analysis
+			m.items[i].AIError = msg.Err
 			
 			// Update list item
 			items := m.list.Items()
@@ -452,4 +489,22 @@ func (m Model) moveToNext() tea.Cmd {
 		}
 		return nil
 	}
+}
+
+func (m Model) triggerAIAnalysisIfReady(itemIndex int) tea.Cmd {
+	if m.aiAgent == nil {
+		return nil
+	}
+	
+	item := &m.items[itemIndex]
+	
+	// Check if we have all required data and haven't started AI analysis yet
+	if !item.LoadingDiff && !item.LoadingChecks && !item.LoadingReviews && 
+	   item.LoadingAI && item.DiffStats != nil && item.CheckStatus != nil && 
+	   item.Reviews != nil && item.DiffError == nil && item.CheckError == nil && item.ReviewError == nil {
+		
+		return FetchAIAnalysisCmd(m.aiAgent, item.PR, item.DiffStats, item.CheckStatus, item.Reviews)
+	}
+	
+	return nil
 }

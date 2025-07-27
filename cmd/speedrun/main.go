@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kennyp/speedrun/internal/ui"
+	"github.com/kennyp/speedrun/pkg/agent"
 	"github.com/kennyp/speedrun/pkg/config"
 	"github.com/kennyp/speedrun/pkg/github"
 	"github.com/kennyp/speedrun/pkg/op"
@@ -70,6 +71,15 @@ func main() {
 			},
 
 			// AI settings
+			&cli.BoolWithInverseFlag{
+				Name:     "ai-enabled",
+				Usage:    "Should AI Be Reivew RP",
+				Category: "AI",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_ENABLED"),
+					toml.TOML("ai.enabled", configFile),
+				),
+			},
 			&cli.StringFlag{
 				Name:     "ai-base-url",
 				Usage:    "AI API base URL (e.g., LLM gateway)",
@@ -185,7 +195,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	// Resolve 1Password references if enabled
 	if cfg.Op.Enabled {
 		opClient := op.New(cfg.Op.Account)
-		
+
 		// Check if op CLI is available
 		if !opClient.Available() {
 			return fmt.Errorf("1Password CLI (op) is not installed or not in PATH")
@@ -221,9 +231,18 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 
 	fmt.Printf("🚀 Starting speedrun for %s...\n", username)
 	fmt.Printf("📍 Search query: %s\n", cfg.GitHub.SearchQuery)
-	
+
+	// Create AI agent if configured
+	var aiAgent *agent.Agent
+	if cfg.AI.Enabled {
+		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model)
+		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
+	} else {
+		fmt.Printf("🤖 AI analysis disabled\n")
+	}
+
 	// Create and run the TUI
-	model := ui.NewModel(ctx, cfg, githubClient, username)
+	model := ui.NewModel(ctx, cfg, githubClient, aiAgent, username)
 	p := tea.NewProgram(model, tea.WithAltScreen())
 
 	if _, err := p.Run(); err != nil {

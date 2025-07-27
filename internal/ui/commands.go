@@ -5,6 +5,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/kennyp/speedrun/pkg/agent"
 	"github.com/kennyp/speedrun/pkg/github"
 )
 
@@ -34,6 +35,13 @@ type CheckStatusLoadedMsg struct {
 type ReviewsLoadedMsg struct {
 	PRNumber int
 	Reviews  []*github.Review
+	Err      error
+}
+
+// AIAnalysisLoadedMsg is sent when AI analysis has been completed for a PR
+type AIAnalysisLoadedMsg struct {
+	PRNumber int
+	Analysis *agent.Analysis
 	Err      error
 }
 
@@ -113,6 +121,41 @@ func ApprovePRCmd(pr *github.PullRequest) tea.Cmd {
 		err := pr.Approve(ctx)
 		return PRApprovedMsg{
 			PRNumber: pr.Number,
+			Err:      err,
+		}
+	}
+}
+
+// FetchAIAnalysisCmd runs AI analysis for a PR
+func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats *github.DiffStats, checkStatus *github.CheckStatus, reviews []*github.Review) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Convert github reviews to agent reviews
+		var agentReviews []agent.ReviewInfo
+		for _, review := range reviews {
+			agentReviews = append(agentReviews, agent.ReviewInfo{
+				State: review.State,
+				User:  review.User,
+			})
+		}
+
+		// Build PR data
+		prData := agent.PRData{
+			Title:        pr.Title,
+			Number:       pr.Number,
+			Additions:    diffStats.Additions,
+			Deletions:    diffStats.Deletions,
+			ChangedFiles: diffStats.Files,
+			CIStatus:     checkStatus.State,
+			Reviews:      agentReviews,
+		}
+
+		analysis, err := aiAgent.AnalyzePR(ctx, prData)
+		return AIAnalysisLoadedMsg{
+			PRNumber: pr.Number,
+			Analysis: analysis,
 			Err:      err,
 		}
 	}
