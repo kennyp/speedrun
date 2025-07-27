@@ -1008,9 +1008,9 @@ func (m Model) renderPopup(baseView string) string {
 	width := m.list.Width()
 	height := m.list.Height() + 4 // Account for status and help
 	
-	// Define popup dimensions (90% of screen, max 120 chars wide, max 40 lines)
-	popupWidth := min(width*9/10, 120)
-	popupHeight := min(height*9/10, 40)
+	// Define popup dimensions (80% of screen to leave more background visible)  
+	popupWidth := min(width*8/10, 100)
+	popupHeight := min(height*8/10, 35)
 	
 	// Format content and handle scrolling
 	formattedContent := m.formatPopupContent(m.popupContent, popupWidth-6)
@@ -1048,22 +1048,19 @@ func (m Model) renderPopup(baseView string) string {
 	
 	content := strings.Join(visibleLines, "\n")
 	
-	// Create popup border style with background
+	// Create popup border style with semi-transparent background
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(lipgloss.Color("205")).
-		Background(lipgloss.Color("236")). // Dark background
-		Foreground(lipgloss.Color("252")). // Light text
+		Background(lipgloss.Color("235")). // Slightly lighter background for contrast
+		Foreground(lipgloss.Color("255")). // Bright white text
 		Padding(1).
 		Width(popupWidth - 4) // Account for border and padding
 	
 	popup := borderStyle.Render(content)
 	
-	// Create the final overlay by placing popup on top of base view
-	// The popup will cover the center area, but background remains visible around edges
-	overlay := lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, popup)
-	
-	return overlay
+	// Simple, clean popup overlay using lipgloss.Place()
+	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, popup)
 }
 
 // formatPopupContent applies basic markdown-like formatting
