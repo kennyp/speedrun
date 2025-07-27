@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 
@@ -173,6 +174,27 @@ func main() {
 					toml.TOML("cache.max_age_days", configFile),
 				),
 			},
+
+			// Logging settings
+			&cli.StringFlag{
+				Name:     "log-level",
+				Usage:    "log level (debug, info, warn, error)",
+				Category: "Logging",
+				Value:    "info",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_LOG_LEVEL"),
+					toml.TOML("log.level", configFile),
+				),
+			},
+			&cli.StringFlag{
+				Name:     "log-path",
+				Usage:    "log file path (empty for stderr, defaults to cache dir/speedrun.log)",
+				Category: "Logging",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_LOG_PATH"),
+					toml.TOML("log.path", configFile),
+				),
+			},
 		},
 		Action: runSpeedrun,
 		Commands: []*cli.Command{
@@ -190,61 +212,126 @@ func main() {
 }
 
 func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
-	// Load configuration from CLI
+	// Load configuration from CLI first to get cache path for default log path
 	cfg := config.LoadFromCLI(cmd)
+	
+	// Set up logging
+	var level slog.Level
+	switch cfg.Log.Level {
+	case "debug":
+		level = slog.LevelDebug
+	case "info":
+		level = slog.LevelInfo
+	case "warn":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	default:
+		level = slog.LevelInfo
+	}
+	
+	// Determine log output
+	var logWriter *os.File
+	if cfg.Log.Path == "" {
+		// Default to speedrun.log in cache directory
+		logPath := filepath.Join(cfg.Cache.Path, "speedrun.log")
+		// Create cache directory if it doesn't exist
+		if err := os.MkdirAll(cfg.Cache.Path, 0755); err != nil {
+			// Fall back to stderr if we can't create cache dir
+			logWriter = os.Stderr
+		} else {
+			var err error
+			logWriter, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			if err != nil {
+				// Fall back to stderr if we can't open log file
+				logWriter = os.Stderr
+			}
+		}
+	} else {
+		var err error
+		logWriter, err = os.OpenFile(cfg.Log.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			// Fall back to stderr if we can't open specified log file
+			logWriter = os.Stderr
+		}
+	}
+	
+	handler := slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level})
+	logger := slog.New(handler)
+	slog.SetDefault(logger)
+	
+	slog.Debug("Starting speedrun", "log_level", cfg.Log.Level, "log_path", cfg.Log.Path)
 
 	// Resolve 1Password references if enabled
 	if cfg.Op.Enabled {
+		slog.Debug("1Password integration enabled")
 		opClient := op.New(cfg.Op.Account)
 
 		// Check if op CLI is available
 		if !opClient.Available() {
+			slog.Error("1Password CLI (op) is not installed or not in PATH")
 			return fmt.Errorf("1Password CLI (op) is not installed or not in PATH")
 		}
 
 		// Sign in to 1Password
+		slog.Debug("Signing in to 1Password...")
 		if err := opClient.SignIn(ctx); err != nil {
+			slog.Error("Failed to sign in to 1Password", "error", err)
 			return fmt.Errorf("failed to sign in to 1Password: %w", err)
 		}
 
 		// Resolve secrets
+		slog.Debug("Resolving secrets from 1Password...")
 		if err := cfg.ResolveSecrets(ctx, opClient); err != nil {
+			slog.Error("Failed to resolve secrets", "error", err)
 			return fmt.Errorf("failed to resolve secrets: %w", err)
 		}
+		slog.Info("Successfully resolved secrets from 1Password")
 	}
 
 	// Validate configuration
+	slog.Debug("Validating configuration...")
 	if err := cfg.Validate(); err != nil {
+		slog.Error("Invalid configuration", "error", err)
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
 	// Initialize cache
+	slog.Debug("Initializing cache", "path", cfg.Cache.Path, "max_age_days", cfg.Cache.MaxAgeDays)
 	cacheInstance, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAgeDays)
 	if err != nil {
+		slog.Error("Failed to initialize cache", "error", err)
 		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
 	defer cacheInstance.Close()
 
 	// Cleanup expired cache entries on startup
+	slog.Debug("Cleaning up expired cache entries...")
 	if err := cacheInstance.Cleanup(); err != nil {
+		slog.Warn("Failed to cleanup cache", "error", err)
 		fmt.Printf("Warning: failed to cleanup cache: %v\n", err)
 	}
 
 	// Create GitHub client
+	slog.Debug("Creating GitHub client", "search_query", cfg.GitHub.SearchQuery)
 	githubChecksConfig := github.ChecksConfig{
 		Ignored:  cfg.Checks.Ignored,
 		Required: cfg.Checks.Required,
 	}
 	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery, cacheInstance, cfg.Backoff.GitHub, githubChecksConfig)
 	if err != nil {
+		slog.Error("Failed to create GitHub client", "error", err)
 		return fmt.Errorf("failed to create GitHub client: %w", err)
 	}
 
 	// Get authenticated user
+	slog.Debug("Getting authenticated user...")
 	username, err := githubClient.AuthenticatedUser(ctx)
 	if err != nil {
+		slog.Error("Failed to get authenticated user", "error", err)
 		return fmt.Errorf("failed to get authenticated user: %w", err)
 	}
+	slog.Info("Successfully authenticated with GitHub", "username", username)
 
 	fmt.Printf("🚀 Starting speedrun for %s...\n", username)
 	fmt.Printf("📍 Search query: %s\n", cfg.GitHub.SearchQuery)
@@ -252,10 +339,13 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	// Create AI agent if configured
 	var aiAgent *agent.Agent
 	if cfg.AI.Enabled {
+		slog.Debug("Creating AI agent", "model", cfg.AI.Model, "base_url", cfg.AI.BaseURL)
 		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.Backoff.OpenAI)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
+		slog.Info("AI agent initialized", "model", cfg.AI.Model)
 	} else {
 		fmt.Printf("🤖 AI analysis disabled\n")
+		slog.Debug("AI analysis disabled")
 	}
 
 	// Create and run the TUI
@@ -317,6 +407,12 @@ enabled = true
 max_age_days = 7
 # Custom cache path (defaults to system cache dir)
 # path = "/custom/cache/path"
+
+[log]
+# Log level: debug, info, warn, error
+level = "info"
+# Log file path (defaults to cache_dir/speedrun.log, empty for stderr)
+# path = "/custom/log/path/speedrun.log"
 `
 
 	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {

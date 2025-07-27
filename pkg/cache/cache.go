@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -28,14 +29,18 @@ type CacheEntry struct {
 
 // New creates a new cache instance
 func New(cacheDir string, maxAgeDays int) (*Cache, error) {
+	slog.Debug("Creating cache", "dir", cacheDir, "max_age_days", maxAgeDays)
+	
 	// Ensure cache directory exists
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
+		slog.Error("Failed to create cache directory", "dir", cacheDir, "error", err)
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
 
 	dbPath := filepath.Join(cacheDir, "speedrun.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
+		slog.Error("Failed to open cache database", "path", dbPath, "error", err)
 		return nil, fmt.Errorf("failed to open cache database: %w", err)
 	}
 

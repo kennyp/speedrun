@@ -14,6 +14,7 @@ type Config struct {
 	AI      AIConfig
 	Checks  ChecksConfig
 	Cache   CacheConfig
+	Log     LogConfig
 	Op      OpConfig
 	Backoff backoffconfig.GlobalConfig
 }
@@ -44,6 +45,12 @@ type CacheConfig struct {
 	MaxAgeDays int    // Maximum age of cache entries in days
 }
 
+// LogConfig holds logging configuration
+type LogConfig struct {
+	Level string // Log level (debug, info, warn, error)
+	Path  string // Log file path (empty for stderr)
+}
+
 // OpConfig holds 1Password configuration
 type OpConfig struct {
 	Enabled bool   // Whether 1Password integration is enabled
@@ -70,6 +77,10 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 		Cache: CacheConfig{
 			Path:       cmd.String("cache-path"),
 			MaxAgeDays: cmd.Int("cache-max-age-days"),
+		},
+		Log: LogConfig{
+			Level: cmd.String("log-level"),
+			Path:  cmd.String("log-path"),
 		},
 		Op: OpConfig{
 			Enabled: cmd.Bool("op-enable"),
