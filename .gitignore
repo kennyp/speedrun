@@ -1,0 +1,8 @@
+# Ignore Local Development Files
+*.local.*
+
+# Ignore bins
+/bin/speedrun
+
+# Ignore the research directory since that's where I play around with concepts
+/research
