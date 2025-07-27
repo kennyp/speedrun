@@ -1,5 +1,7 @@
 # Ignore Local Development Files
 *.local.*
+*.log
+*.db
 
 # Ignore bins
 /bin/speedrun

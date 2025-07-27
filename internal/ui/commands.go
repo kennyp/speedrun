@@ -54,6 +54,12 @@ type PRApprovedMsg struct {
 // StatusMsg is a general status update message
 type StatusMsg string
 
+// SmartRefreshLoadedMsg is sent when smart refresh has completed
+type SmartRefreshLoadedMsg struct {
+	PRs []*github.PullRequest
+	Err error
+}
+
 // Commands
 
 // FetchPRsCmd fetches PRs from GitHub
@@ -175,6 +181,36 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 			Analysis: analysis,
 			Err:      err,
 		}
+	}
+}
+
+// FetchCachedAIAnalysisCmd loads cached AI analysis for a PR
+func FetchCachedAIAnalysisCmd(pr *github.PullRequest) tea.Cmd {
+	return func() tea.Msg {
+		// Check for cached AI analysis
+		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
+			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
+				return AIAnalysisLoadedMsg{
+					PRNumber: pr.Number,
+					Analysis: analysis,
+					Err:      nil,
+				}
+			}
+		}
+		
+		// No cached analysis found - this shouldn't happen if we checked properly
+		return nil
+	}
+}
+
+// SmartRefreshCmd fetches fresh PRs for smart refresh
+func SmartRefreshCmd(client *github.Client) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		prs, err := client.SearchPullRequestsFresh(ctx)
+		return SmartRefreshLoadedMsg{PRs: prs, Err: err}
 	}
 }
 

@@ -28,16 +28,15 @@ type CacheEntry struct {
 }
 
 // New creates a new cache instance
-func New(cacheDir string, maxAgeDays int) (*Cache, error) {
-	slog.Debug("Creating cache", "dir", cacheDir, "max_age_days", maxAgeDays)
+func New(dbPath string, maxAgeDays int) (*Cache, error) {
+	slog.Debug("Creating cache", "path", dbPath, "max_age_days", maxAgeDays)
 	
-	// Ensure cache directory exists
+	// Ensure parent directory exists
+	cacheDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
 		slog.Error("Failed to create cache directory", "dir", cacheDir, "error", err)
 		return nil, fmt.Errorf("failed to create cache directory: %w", err)
 	}
-
-	dbPath := filepath.Join(cacheDir, "speedrun.db")
 	db, err := sql.Open("sqlite", dbPath)
 	if err != nil {
 		slog.Error("Failed to open cache database", "path", dbPath, "error", err)

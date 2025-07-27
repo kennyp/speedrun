@@ -56,6 +56,18 @@ func (pr *PullRequest) invalidateCache() {
 	pr.client.cache.Delete(pr.aiAnalysisCacheKey())
 }
 
+// InvalidateCommitRelatedCache removes cached data that changes when commits are updated
+func (pr *PullRequest) InvalidateCommitRelatedCache() {
+	if pr.client.cache == nil {
+		return
+	}
+
+	// Delete commit-related cached data (but preserve reviews)
+	pr.client.cache.Delete(pr.diffStatsCacheKey())
+	pr.client.cache.Delete(pr.checkStatusCacheKey())
+	pr.client.cache.Delete(pr.aiAnalysisCacheKey())
+}
+
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR
 func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
 	if pr.client.cache == nil {
@@ -112,6 +124,10 @@ func newPullRequestFromIssue(client *Client, issue *github.Issue) (*PullRequest,
 
 // GetReviews returns the reviews for this PR
 func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
+	if pr.client == nil {
+		return nil, fmt.Errorf("PR client is nil")
+	}
+	
 	cacheKey := pr.reviewsCacheKey()
 	
 	// Try to get from cache first
@@ -169,6 +185,10 @@ func (pr *PullRequest) HasUserReviewed(ctx context.Context, username string) (bo
 
 // GetCheckStatus returns the combined check status for this PR
 func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error) {
+	if pr.client == nil {
+		return nil, fmt.Errorf("PR client is nil")
+	}
+	
 	cacheKey := pr.checkStatusCacheKey()
 	
 	// Try to get from cache first
@@ -263,6 +283,10 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 
 // GetDiffStats returns the diff statistics for this PR
 func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
+	if pr.client == nil {
+		return nil, fmt.Errorf("PR client is nil")
+	}
+	
 	cacheKey := pr.diffStatsCacheKey()
 	
 	// Try to get from cache first

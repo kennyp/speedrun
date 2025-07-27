@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"strings"
 
@@ -89,6 +90,11 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 	if c.cache != nil {
 		var cachedPRs []*PullRequest
 		if err := c.cache.Get(cacheKey, &cachedPRs); err == nil {
+			// Restore client field for cached PRs since it's not serialized
+			for _, pr := range cachedPRs {
+				pr.client = c
+			}
+			slog.Debug("Retrieved PRs from cache", "count", len(cachedPRs))
 			return cachedPRs, nil
 		}
 	}
@@ -128,7 +134,7 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 		pr, err := newPullRequestFromIssue(c, issue)
 		if err != nil {
-			// Log error but continue with other PRs
+			slog.Debug("Failed to create PR from issue", "issue_number", issue.GetNumber(), "error", err)
 			continue
 		}
 
@@ -137,6 +143,59 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 	// Cache the results
 	if c.cache != nil {
+		c.cache.Set(cacheKey, prs)
+	}
+
+	return prs, nil
+}
+
+// SearchPullRequestsFresh searches for pull requests bypassing cache (for refresh)
+func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, error) {
+	opts := &github.SearchOptions{
+		Sort:  "created",
+		Order: "desc",
+		ListOptions: github.ListOptions{
+			PerPage: 100,
+		},
+	}
+
+	var result *github.IssuesSearchResult
+	operation := func() error {
+		var searchErr error
+		result, _, searchErr = c.client.Search.Issues(ctx, c.searchQuery, opts)
+		return searchErr
+	}
+
+	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
+	if err != nil {
+		return nil, fmt.Errorf("failed to search PRs: %w", err)
+	}
+
+	var prs []*PullRequest
+	for _, issue := range result.Issues {
+		// Skip if not a PR
+		if issue.PullRequestLinks == nil {
+			continue
+		}
+
+		// Skip if merged
+		if issue.PullRequestLinks.MergedAt != nil {
+			continue
+		}
+
+		pr, err := newPullRequestFromIssue(c, issue)
+		if err != nil {
+			slog.Debug("Failed to create PR from issue", "issue_number", issue.GetNumber(), "error", err)
+			continue
+		}
+
+		prs = append(prs, pr)
+	}
+
+	// Update the cache with fresh results
+	if c.cache != nil {
+		cacheKey := c.searchCacheKey()
 		c.cache.Set(cacheKey, prs)
 	}
 

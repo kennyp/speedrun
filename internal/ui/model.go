@@ -3,6 +3,7 @@ package ui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/charmbracelet/bubbles/key"
@@ -54,6 +55,9 @@ type Model struct {
 	// Loading states
 	loadingPRs bool
 	
+	// Filter state
+	showOnlyUnreviewed bool
+	
 	// Key bindings
 	keys KeyMap
 }
@@ -63,6 +67,7 @@ type KeyMap struct {
 	Approve   key.Binding
 	Skip      key.Binding
 	View      key.Binding
+	Filter    key.Binding
 	Quit      key.Binding
 	Refresh   key.Binding
 }
@@ -81,6 +86,10 @@ func DefaultKeyMap() KeyMap {
 		View: key.NewBinding(
 			key.WithKeys("v"),
 			key.WithHelp("v", "view in browser"),
+		),
+		Filter: key.NewBinding(
+			key.WithKeys("f"),
+			key.WithHelp("f", "toggle filter"),
 		),
 		Quit: key.NewBinding(
 			key.WithKeys("q", "ctrl+c"),
@@ -119,6 +128,7 @@ func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Clie
 		spinner:  s,
 		keys:     DefaultKeyMap(),
 		loadingPRs: true,
+		showOnlyUnreviewed: true, // Default to showing only unreviewed PRs
 	}
 }
 
@@ -154,6 +164,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case key.Matches(msg, m.keys.View):
 			return m.handleView()
 
+		case key.Matches(msg, m.keys.Filter):
+			return m.handleFilter()
+
 		case key.Matches(msg, m.keys.Refresh):
 			return m.handleRefresh()
 		}
@@ -177,6 +190,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case AIAnalysisLoadedMsg:
 		return m.handleAIAnalysisLoaded(msg)
+
+	case SmartRefreshLoadedMsg:
+		return m.handleSmartRefreshLoaded(msg)
 
 	case PRApprovedMsg:
 		return m.handlePRApproved(msg)
@@ -207,7 +223,7 @@ func (m Model) View() string {
 	}
 
 	// Help text
-	help := helpStyle.Render("a: approve • s: skip • v: view • r: refresh • q: quit")
+	help := helpStyle.Render("a: approve • s: skip • v: view • f: toggle filter • r: refresh • q: quit")
 
 	// Status with spinner if loading
 	status := m.status
@@ -253,34 +269,42 @@ func (m Model) handlePRsLoaded(msg PRsLoadedMsg) (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	// Filter out PRs already reviewed by the user
-	var unreviewed []*github.PullRequest
-	for _, pr := range msg.PRs {
-		// For now, add all PRs. We'll filter after loading reviews
-		unreviewed = append(unreviewed, pr)
-	}
-
-	// Create list items
-	items := make([]list.Item, len(unreviewed))
-	m.items = make([]PRItem, len(unreviewed))
+	// Create list items for all PRs (filtering will happen dynamically as review data loads)
+	m.items = make([]PRItem, len(msg.PRs))
 	
-	for i, pr := range unreviewed {
+	for i, pr := range msg.PRs {
+		// Check if AI analysis is already cached
+		loadingAI := m.aiAgent != nil
+		if m.aiAgent != nil {
+			if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
+				if _, ok := cachedAnalysis.(*agent.Analysis); ok {
+					loadingAI = false // Don't show loading if we have cached analysis
+				}
+			}
+		}
+		
 		m.items[i] = PRItem{
 			PR:             pr,
 			LoadingDiff:    true,
 			LoadingChecks:  true,
 			LoadingReviews: true,
-			LoadingAI:      m.aiAgent != nil, // Only show AI loading if AI is enabled
+			LoadingAI:      loadingAI,
 		}
-		items[i] = m.items[i]
 	}
 
-	m.list.SetItems(items)
-	m.status = fmt.Sprintf("Found %d pull requests", len(unreviewed))
+	// Apply initial filter (will show all PRs initially since review status is unknown)
+	m = m.updateVisibleItems()
+
+	// Update status message with filter information
+	filterText := ""
+	if m.showOnlyUnreviewed {
+		filterText = " (unreviewed only)"
+	}
+	m.status = fmt.Sprintf("Found %d pull requests%s", len(msg.PRs), filterText)
 
 	// Start loading details for all PRs
 	cmds := []tea.Cmd{}
-	for i, pr := range unreviewed {
+	for i, pr := range msg.PRs {
 		// Stagger requests to avoid rate limiting
 		delay := time.Duration(i*50) * time.Millisecond
 		cmds = append(cmds,
@@ -294,6 +318,11 @@ func (m Model) handlePRsLoaded(msg PRsLoadedMsg) (Model, tea.Cmd) {
 				return FetchReviewsCmd(m.github, pr, m.username)()
 			}),
 		)
+		
+		// Load cached AI analysis immediately if available
+		if !m.items[i].LoadingAI {
+			cmds = append(cmds, FetchCachedAIAnalysisCmd(pr))
+		}
 	}
 
 	return m, tea.Batch(cmds...)
@@ -307,10 +336,8 @@ func (m Model) handleDiffStatsLoaded(msg DiffStatsLoadedMsg) (Model, tea.Cmd) {
 			m.items[i].DiffStats = msg.Stats
 			m.items[i].DiffError = msg.Err
 			
-			// Update list item
-			items := m.list.Items()
-			items[i] = m.items[i]
-			m.list.SetItems(items)
+			// Re-apply filter to update the visible list
+			m = m.updateVisibleItems()
 			
 			// Trigger AI analysis if we have all required data and AI agent is available
 			cmd := m.triggerAIAnalysisIfReady(i)
@@ -329,10 +356,8 @@ func (m Model) handleCheckStatusLoaded(msg CheckStatusLoadedMsg) (Model, tea.Cmd
 			m.items[i].CheckStatus = msg.Status
 			m.items[i].CheckError = msg.Err
 			
-			// Update list item
-			items := m.list.Items()
-			items[i] = m.items[i]
-			m.list.SetItems(items)
+			// Re-apply filter to update the visible list
+			m = m.updateVisibleItems()
 			
 			// Trigger AI analysis if we have all required data and AI agent is available
 			cmd := m.triggerAIAnalysisIfReady(i)
@@ -351,18 +376,20 @@ func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 			m.items[i].Reviews = msg.Reviews
 			m.items[i].ReviewError = msg.Err
 			
-			// Check if current user has reviewed
+			// Check if current user has reviewed and determine review type
 			for _, review := range msg.Reviews {
 				if review.User == m.username {
 					m.items[i].Reviewed = true
-					break
+					if review.State == "APPROVED" {
+						m.items[i].Approved = true
+					}
+					// Note: We don't break here because there might be multiple reviews
+					// and we want to find the most recent APPROVED status
 				}
 			}
 			
-			// Update list item
-			items := m.list.Items()
-			items[i] = m.items[i]
-			m.list.SetItems(items)
+			// Re-apply filter since review status may have changed
+			m = m.updateVisibleItems()
 			
 			// Trigger AI analysis if we have all required data and AI agent is available
 			cmd := m.triggerAIAnalysisIfReady(i)
@@ -381,15 +408,135 @@ func (m Model) handleAIAnalysisLoaded(msg AIAnalysisLoadedMsg) (Model, tea.Cmd) 
 			m.items[i].AIAnalysis = msg.Analysis
 			m.items[i].AIError = msg.Err
 			
-			// Update list item
-			items := m.list.Items()
-			items[i] = m.items[i]
-			m.list.SetItems(items)
+			// Re-apply filter to update the visible list
+			m = m.updateVisibleItems()
 			break
 		}
 	}
 	
 	return m, nil
+}
+
+func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.Cmd) {
+	m.loadingPRs = false
+	
+	if msg.Err != nil {
+		m.status = errorStyle.Render("Failed to refresh PRs: " + msg.Err.Error())
+		return m, nil
+	}
+
+	// Create maps for efficient lookups
+	existingPRs := make(map[int]*PRItem)
+	for i := range m.items {
+		existingPRs[m.items[i].PR.Number] = &m.items[i]
+	}
+	
+	freshPRMap := make(map[int]*github.PullRequest)
+	for _, pr := range msg.PRs {
+		freshPRMap[pr.Number] = pr
+	}
+
+	var newItems []PRItem
+	newPRCount := 0
+	updatedPRCount := 0
+	
+	// Process fresh PRs from GitHub
+	for _, freshPR := range msg.PRs {
+		if existingItem, exists := existingPRs[freshPR.Number]; exists {
+			// Existing PR - check if it needs updates
+			needsAIUpdate := false
+			
+			// Check if PR has new commits (HeadSHA changed)
+			if existingItem.PR.HeadSHA != "" && freshPR.HeadSHA != "" && 
+			   existingItem.PR.HeadSHA != freshPR.HeadSHA {
+				needsAIUpdate = true
+				updatedPRCount++
+				
+				// Clear cached data for updated PR since commits changed
+				// (but preserve reviews cache since those don't change with commits)
+				existingItem.PR.InvalidateCommitRelatedCache()
+			}
+			
+			// Update the PR data but preserve loading states and cached data
+			updatedItem := *existingItem
+			updatedItem.PR = freshPR // Update with fresh PR data
+			
+			// Reset loading states for data we want to refresh
+			if needsAIUpdate {
+				updatedItem.LoadingDiff = true
+				updatedItem.LoadingChecks = true
+				updatedItem.LoadingAI = m.aiAgent != nil
+				updatedItem.DiffStats = nil
+				updatedItem.CheckStatus = nil
+				updatedItem.AIAnalysis = nil
+			}
+			// Reviews are already marked as loading from handleRefresh
+			
+			newItems = append(newItems, updatedItem)
+		} else {
+			// New PR - add with full loading state
+			newPRCount++
+			newItem := PRItem{
+				PR:             freshPR,
+				LoadingDiff:    true,
+				LoadingChecks:  true,
+				LoadingReviews: true,
+				LoadingAI:      m.aiAgent != nil,
+			}
+			newItems = append(newItems, newItem)
+		}
+	}
+	
+	// Update items list
+	m.items = newItems
+	
+	// Apply filter to update visible items
+	m = m.updateVisibleItems()
+	
+	// Update status with refresh results
+	statusParts := []string{fmt.Sprintf("Refreshed %d PRs", len(msg.PRs))}
+	if newPRCount > 0 {
+		statusParts = append(statusParts, fmt.Sprintf("%d new", newPRCount))
+	}
+	if updatedPRCount > 0 {
+		statusParts = append(statusParts, fmt.Sprintf("%d updated", updatedPRCount))
+	}
+	
+	filterText := ""
+	if m.showOnlyUnreviewed {
+		filterText = " (unreviewed only)"
+	}
+	m.status = fmt.Sprintf("%s%s", strings.Join(statusParts, ", "), filterText)
+	
+	// Start loading data for new and updated PRs
+	cmds := []tea.Cmd{}
+	for i, item := range m.items {
+		pr := item.PR
+		delay := time.Duration(i*50) * time.Millisecond
+		
+		// Load diff stats if needed
+		if item.LoadingDiff {
+			cmds = append(cmds, tea.Tick(delay, func(t time.Time) tea.Msg {
+				return FetchDiffStatsCmd(m.github, pr)()
+			}))
+		}
+		
+		// Load check status if needed  
+		if item.LoadingChecks {
+			cmds = append(cmds, tea.Tick(delay+20*time.Millisecond, func(t time.Time) tea.Msg {
+				return FetchCheckStatusCmd(m.github, pr)()
+			}))
+		}
+		
+		// Always refresh reviews (user might have reviewed)
+		if item.LoadingReviews {
+			cmds = append(cmds, tea.Tick(delay+40*time.Millisecond, func(t time.Time) tea.Msg {
+				return FetchReviewsCmd(m.github, pr, m.username)()
+			}))
+		}
+	}
+	
+	return m, tea.Batch(cmds...)
 }
 
 func (m Model) handlePRApproved(msg PRApprovedMsg) (Model, tea.Cmd) {
@@ -404,15 +551,13 @@ func (m Model) handlePRApproved(msg PRApprovedMsg) (Model, tea.Cmd) {
 			m.items[i].Approved = true
 			m.items[i].Reviewed = true
 			
-			// Update list item
-			items := m.list.Items()
-			items[i] = m.items[i]
-			m.list.SetItems(items)
-			
 			m.status = successStyle.Render(fmt.Sprintf("✅ Approved PR #%d", msg.PRNumber))
 			break
 		}
 	}
+
+	// Re-apply filter since review status changed
+	m = m.updateVisibleItems()
 
 	// Move to next item
 	return m, m.moveToNext()
@@ -471,14 +616,83 @@ func (m Model) handleView() (Model, tea.Cmd) {
 
 func (m Model) handleRefresh() (Model, tea.Cmd) {
 	m.loadingPRs = true
-	m.status = "Refreshing pull requests..."
-	m.items = []PRItem{}
-	m.list.SetItems([]list.Item{})
+	m.status = "Checking for updates..."
+	
+	// Mark all existing reviews as loading to re-check review status
+	for i := range m.items {
+		m.items[i].LoadingReviews = true
+	}
+	
+	// Re-apply filter to show loading state
+	m = m.updateVisibleItems()
 	
 	return m, tea.Batch(
 		m.spinner.Tick,
-		FetchPRsCmd(m.github),
+		SmartRefreshCmd(m.github),
 	)
+}
+
+func (m Model) handleFilter() (Model, tea.Cmd) {
+	// Toggle filter state
+	m.showOnlyUnreviewed = !m.showOnlyUnreviewed
+	
+	// Update visible items based on new filter state (don't preserve selection for user-initiated filter)
+	m = m.updateVisibleItemsWithPreserveSelection(false)
+	
+	// Update status message
+	filterStatus := "all"
+	if m.showOnlyUnreviewed {
+		filterStatus = "unreviewed only"
+	}
+	m.status = fmt.Sprintf("Filter toggled: showing %s PRs", filterStatus)
+	
+	return m, nil
+}
+
+func (m Model) updateVisibleItems() Model {
+	return m.updateVisibleItemsWithPreserveSelection(true)
+}
+
+func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) Model {
+	if len(m.items) == 0 {
+		return m
+	}
+	
+	// Get currently selected PR to prevent jarring disappearance (only during async updates)
+	currentSelection := m.list.SelectedItem()
+	var selectedPRNumber int
+	if preserveSelection && currentSelection != nil {
+		if prItem, ok := currentSelection.(PRItem); ok {
+			selectedPRNumber = prItem.PR.Number
+		}
+	}
+	
+	var visibleItems []list.Item
+	
+	for _, item := range m.items {
+		shouldShow := false
+		
+		if m.showOnlyUnreviewed {
+			// Show PR if:
+			// - Not reviewed AND not approved yet, OR
+			// - Review status is still being loaded, OR  
+			// - It's the currently selected PR (prevent jarring disappearance)
+			shouldShow = (!item.Reviewed && !item.Approved) || item.LoadingReviews || 
+						 (selectedPRNumber > 0 && item.PR.Number == selectedPRNumber)
+		} else {
+			// Show all PRs
+			shouldShow = true
+		}
+		
+		if shouldShow {
+			visibleItems = append(visibleItems, item)
+		}
+	}
+	
+	// Update the list with filtered items
+	m.list.SetItems(visibleItems)
+	
+	return m
 }
 
 func (m Model) moveToNext() tea.Cmd {

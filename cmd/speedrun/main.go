@@ -156,9 +156,9 @@ func main() {
 			// Cache settings
 			&cli.StringFlag{
 				Name:     "cache-path",
-				Usage:    "cache directory path",
+				Usage:    "cache database file path",
 				Category: "Cache",
-				Value:    filepath.Join(cacheDir, "speedrun"),
+				Value:    filepath.Join(cacheDir, "speedrun.db"),
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CACHE_PATH"),
 					toml.TOML("cache.path", configFile),
@@ -405,8 +405,8 @@ enabled = true
 [cache]
 # Maximum age of cache entries in days
 max_age_days = 7
-# Custom cache path (defaults to system cache dir)
-# path = "/custom/cache/path"
+# Custom cache database file path (defaults to system cache dir/speedrun.db)
+# path = "/custom/cache/speedrun.db"
 
 [log]
 # Log level: debug, info, warn, error
