@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/cenkalti/backoff/v4"
 	"github.com/google/go-github/v73/github"
@@ -70,11 +71,20 @@ func getGHToken(ctx context.Context) (string, error) {
 
 // AuthenticatedUser returns the authenticated user's login
 func (c *Client) AuthenticatedUser(ctx context.Context) (string, error) {
+	slog.Debug("Getting authenticated user")
+	start := time.Now()
+	
 	user, _, err := c.client.Users.Get(ctx, "")
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("Failed to get authenticated user", slog.Duration("duration", duration), slog.Any("error", err))
 		return "", fmt.Errorf("failed to get authenticated user: %w", err)
 	}
-	return user.GetLogin(), nil
+	
+	username := user.GetLogin()
+	slog.Debug("Successfully retrieved authenticated user", slog.String("username", username), slog.Duration("duration", duration))
+	return username, nil
 }
 
 // SearchPullRequests searches for pull requests matching the configured query
@@ -84,6 +94,9 @@ func (c *Client) searchCacheKey() string {
 }
 
 func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error) {
+	slog.Debug("Starting PR search", slog.String("query", c.searchQuery))
+	start := time.Now()
+	
 	cacheKey := c.searchCacheKey()
 	
 	// Try to get from cache first
@@ -94,7 +107,8 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 			for _, pr := range cachedPRs {
 				pr.client = c
 			}
-			slog.Debug("Retrieved PRs from cache", "count", len(cachedPRs))
+			duration := time.Since(start)
+			slog.Debug("Retrieved PRs from cache", slog.String("query", c.searchQuery), slog.Int("count", len(cachedPRs)), slog.Duration("duration", duration))
 			return cachedPRs, nil
 		}
 	}
@@ -116,9 +130,14 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("GitHub API search failed", slog.String("query", c.searchQuery), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to search PRs: %w", err)
 	}
+	
+	slog.Debug("GitHub API search completed", slog.String("query", c.searchQuery), slog.Int("raw_results", len(result.Issues)), slog.Duration("duration", duration))
 
 	var prs []*PullRequest
 	for _, issue := range result.Issues {
@@ -134,12 +153,14 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 		pr, err := newPullRequestFromIssue(c, issue)
 		if err != nil {
-			slog.Debug("Failed to create PR from issue", "issue_number", issue.GetNumber(), "error", err)
+			slog.Debug("Failed to create PR from issue", slog.String("issue_number", fmt.Sprintf("%d", issue.GetNumber())), slog.Any("error", err))
 			continue
 		}
 
 		prs = append(prs, pr)
 	}
+
+	slog.Info("PR search results processed", slog.String("query", c.searchQuery), slog.Int("filtered_prs", len(prs)), slog.Duration("total_duration", time.Since(start)))
 
 	// Cache the results
 	if c.cache != nil {
@@ -151,6 +172,9 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 // SearchPullRequestsFresh searches for pull requests bypassing cache (for refresh)
 func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, error) {
+	slog.Debug("Starting fresh PR search", slog.String("query", c.searchQuery))
+	start := time.Now()
+	
 	opts := &github.SearchOptions{
 		Sort:  "created",
 		Order: "desc",
@@ -168,9 +192,14 @@ func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, e
 
 	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("GitHub API fresh search failed", slog.String("query", c.searchQuery), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to search PRs: %w", err)
 	}
+	
+	slog.Debug("GitHub API fresh search completed", slog.String("query", c.searchQuery), slog.Int("raw_results", len(result.Issues)), slog.Duration("duration", duration))
 
 	var prs []*PullRequest
 	for _, issue := range result.Issues {
@@ -186,12 +215,14 @@ func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, e
 
 		pr, err := newPullRequestFromIssue(c, issue)
 		if err != nil {
-			slog.Debug("Failed to create PR from issue", "issue_number", issue.GetNumber(), "error", err)
+			slog.Debug("Failed to create PR from issue", slog.String("issue_number", fmt.Sprintf("%d", issue.GetNumber())), slog.Any("error", err))
 			continue
 		}
 
 		prs = append(prs, pr)
 	}
+
+	slog.Info("Fresh PR search results processed", slog.String("query", c.searchQuery), slog.Int("filtered_prs", len(prs)), slog.Duration("total_duration", time.Since(start)))
 
 	// Update the cache with fresh results
 	if c.cache != nil {

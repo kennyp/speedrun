@@ -3,6 +3,7 @@ package github
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net/url"
 	"os/exec"
 	"strings"
@@ -24,6 +25,17 @@ type PullRequest struct {
 
 	client *Client
 	ghi    *github.Issue
+}
+
+// LogValue implements slog.LogValuer for structured logging
+func (pr *PullRequest) LogValue() slog.Value {
+	return slog.GroupValue(
+		slog.Int("number", pr.Number),
+		slog.String("repo", fmt.Sprintf("%s/%s", pr.Owner, pr.Repo)),
+		slog.String("title", pr.Title),
+		slog.String("head_sha", pr.HeadSHA),
+		slog.Time("updated_at", pr.UpdatedAt),
+	)
 }
 
 // Cache key helpers for PR data
@@ -128,12 +140,17 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 		return nil, fmt.Errorf("PR client is nil")
 	}
 	
+	slog.Debug("Getting PR reviews", slog.Any("pr", pr))
+	start := time.Now()
+	
 	cacheKey := pr.reviewsCacheKey()
 	
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedReviews []*Review
 		if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
+			duration := time.Since(start)
+			slog.Debug("Retrieved reviews from cache", slog.Any("pr", pr), slog.Int("count", len(cachedReviews)), slog.Duration("duration", duration))
 			return cachedReviews, nil
 		}
 	}
@@ -147,7 +164,10 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 
 	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("GitHub API get reviews failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get reviews: %w", err)
 	}
 
@@ -159,6 +179,8 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 			Body:  review.GetBody(),
 		})
 	}
+
+	slog.Debug("GitHub API get reviews completed", slog.Any("pr", pr), slog.Int("count", len(result)), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results
 	if pr.client.cache != nil {
@@ -189,12 +211,17 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 		return nil, fmt.Errorf("PR client is nil")
 	}
 	
+	slog.Debug("Getting PR check status", slog.Any("pr", pr))
+	start := time.Now()
+	
 	cacheKey := pr.checkStatusCacheKey()
 	
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedStatus *CheckStatus
 		if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
+			duration := time.Since(start)
+			slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
 			return cachedStatus, nil
 		}
 	}
@@ -210,10 +237,13 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	if err != nil {
+		duration := time.Since(start)
+		slog.Error("GitHub API get PR details failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get PR details: %w", err)
 	}
 
 	pr.HeadSHA = prDetails.GetHead().GetSHA()
+	slog.Debug("Retrieved PR details", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA))
 
 	// Get both check runs (modern) and statuses (legacy)
 	var checkRuns *github.ListCheckRunsResults
@@ -273,6 +303,8 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	status.Description = formatCheckDescription(filteredDetails)
 	status.Details = filteredDetails
 
+	slog.Debug("GitHub API get check status completed", slog.Any("pr", pr), slog.Any("status", status), slog.Duration("duration", time.Since(start)))
+
 	// Cache the results
 	if pr.client.cache != nil {
 		pr.client.cache.Set(cacheKey, status)
@@ -287,12 +319,17 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 		return nil, fmt.Errorf("PR client is nil")
 	}
 	
+	slog.Debug("Getting PR diff stats", slog.Any("pr", pr))
+	start := time.Now()
+	
 	cacheKey := pr.diffStatsCacheKey()
 	
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedStats *DiffStats
 		if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
+			duration := time.Since(start)
+			slog.Debug("Retrieved diff stats from cache", slog.Any("pr", pr), slog.Any("stats", cachedStats), slog.Duration("duration", duration))
 			return cachedStats, nil
 		}
 	}
@@ -306,7 +343,10 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 
 	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("GitHub API get diff stats failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get PR details: %w", err)
 	}
 
@@ -316,6 +356,8 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 		Changes:   prDetails.GetChangedFiles(),
 		Files:     prDetails.GetChangedFiles(),
 	}
+
+	slog.Debug("GitHub API get diff stats completed", slog.Any("pr", pr), slog.Any("stats", stats), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results
 	if pr.client.cache != nil {
@@ -327,15 +369,23 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 
 // Approve approves this PR
 func (pr *PullRequest) Approve(ctx context.Context) error {
+	slog.Debug("Approving PR", slog.Any("pr", pr))
+	start := time.Now()
+	
 	review := &github.PullRequestReviewRequest{
 		Event: github.String("APPROVE"),
 		Body:  github.String("LGTM"),
 	}
 
 	_, _, err := pr.client.client.PullRequests.CreateReview(ctx, pr.Owner, pr.Repo, pr.Number, review)
+	duration := time.Since(start)
+	
 	if err != nil {
+		slog.Error("GitHub API approve PR failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to approve PR: %w", err)
 	}
+
+	slog.Info("GitHub API approve PR completed", slog.Any("pr", pr), slog.Duration("duration", duration))
 
 	// Invalidate cache since PR state has changed
 	pr.invalidateCache()

@@ -79,6 +79,7 @@ func (c *Cache) initialize() error {
 
 // Get retrieves a cached value by key
 func (c *Cache) Get(key string, dest interface{}) error {
+	start := time.Now()
 	query := `
 		SELECT data, expires_at 
 		FROM cache_entries 
@@ -89,24 +90,32 @@ func (c *Cache) Get(key string, dest interface{}) error {
 	var expiresAt string
 	
 	err := c.db.QueryRow(query, key).Scan(&data, &expiresAt)
+	duration := time.Since(start)
+	
 	if err != nil {
 		if err == sql.ErrNoRows {
+			slog.Debug("Cache miss", slog.String("key", key), slog.Duration("duration", duration))
 			return ErrCacheMiss
 		}
+		slog.Debug("Cache get failed", slog.String("key", key), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to get cache entry: %w", err)
 	}
 
 	if err := json.Unmarshal(data, dest); err != nil {
+		slog.Debug("Cache unmarshal failed", slog.String("key", key), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to unmarshal cached data: %w", err)
 	}
 
+	slog.Debug("Cache hit", slog.String("key", key), slog.Duration("duration", duration), slog.Int("data_size", len(data)))
 	return nil
 }
 
 // Set stores a value in the cache with the configured TTL
 func (c *Cache) Set(key string, value interface{}) error {
+	start := time.Now()
 	data, err := json.Marshal(value)
 	if err != nil {
+		slog.Debug("Cache marshal failed", slog.String("key", key), slog.Any("error", err))
 		return fmt.Errorf("failed to marshal cache data: %w", err)
 	}
 
@@ -119,20 +128,29 @@ func (c *Cache) Set(key string, value interface{}) error {
 	`
 
 	if _, err := c.db.Exec(query, key, data, now, expiresAt); err != nil {
+		duration := time.Since(start)
+		slog.Debug("Cache set failed", slog.String("key", key), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to set cache entry: %w", err)
 	}
 
+	duration := time.Since(start)
+	slog.Debug("Cache set", slog.String("key", key), slog.Duration("duration", duration), slog.Int("data_size", len(data)))
 	return nil
 }
 
 // Delete removes a cache entry by key
 func (c *Cache) Delete(key string) error {
+	start := time.Now()
 	query := `DELETE FROM cache_entries WHERE key = ?`
 	
 	if _, err := c.db.Exec(query, key); err != nil {
+		duration := time.Since(start)
+		slog.Debug("Cache delete failed", slog.String("key", key), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to delete cache entry: %w", err)
 	}
 
+	duration := time.Since(start)
+	slog.Debug("Cache delete", slog.String("key", key), slog.Duration("duration", duration))
 	return nil
 }
 
