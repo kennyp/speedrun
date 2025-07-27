@@ -1,15 +1,25 @@
 package agent
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"strings"
+	"text/template"
+
+	_ "embed"
 
 	"github.com/cenkalti/backoff/v4"
+	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
-	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
 )
+
+//go:embed prompts/developer.md
+var DeveloperMessage string
+
+//go:embed prompts/review.tmpl.md
+var ReviewMessageTemplate string
 
 // Recommendation represents the AI's recommendation for a PR
 type Recommendation string
@@ -53,13 +63,17 @@ func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config)
 
 // AnalyzePR analyzes a PR and returns a recommendation
 func (a *Agent) AnalyzePR(ctx context.Context, prData PRData) (*Analysis, error) {
-	prompt := a.buildPrompt(prData)
+	prompt, err := a.buildPrompt(prData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate prompt (%w)", err)
+	}
 
 	var response *openai.ChatCompletion
 	operation := func() error {
 		var apiErr error
 		response, apiErr = a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
 			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.DeveloperMessage(DeveloperMessage),
 				openai.UserMessage(prompt),
 			},
 			Model: a.model,
@@ -68,8 +82,7 @@ func (a *Agent) AnalyzePR(ctx context.Context, prData PRData) (*Analysis, error)
 	}
 
 	exponentialBackoff := a.backoffConfig.ToExponentialBackoff()
-	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
-	if err != nil {
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
 		return nil, fmt.Errorf("failed to get AI response: %w", err)
 	}
 
@@ -98,44 +111,20 @@ type ReviewInfo struct {
 	User  string
 }
 
-func (a *Agent) buildPrompt(pr PRData) string {
-	return fmt.Sprintf(`Analyze this GitHub pull request and provide a recommendation for an on-call engineer:
+func (a *Agent) buildPrompt(pr PRData) (string, error) {
+	funcMap := template.FuncMap{
+		"sum": func(a, b int) int {
+			return a + b
+		},
+	}
+	t := template.Must(template.New("review").Funcs(funcMap).Parse(ReviewMessageTemplate))
 
-PR: #%d - %s
-
-**Changes:**
-- Files changed: %d
-- Lines added: %d  
-- Lines deleted: %d
-- Total changes: %d
-
-**CI Status:** %s
-
-**Existing Reviews:** %s
-
-Based on this information, recommend one of:
-- APPROVE: Safe to quickly approve (simple changes, passing CI, low risk)
-- REVIEW: Needs careful review (moderate complexity or unclear status)  
-- DEEP_REVIEW: Requires thorough investigation (complex changes, failing CI, high risk)
-
-Respond in this format:
-RECOMMENDATION: [APPROVE/REVIEW/DEEP_REVIEW]
-RISK_LEVEL: [LOW/MEDIUM/HIGH]
-REASONING: [Brief explanation of why you made this recommendation]`,
-		pr.Number, pr.Title, pr.ChangedFiles, pr.Additions, pr.Deletions,
-		pr.Additions+pr.Deletions, pr.CIStatus, a.formatReviews(pr.Reviews))
-}
-
-func (a *Agent) formatReviews(reviews []ReviewInfo) string {
-	if len(reviews) == 0 {
-		return "None"
+	var prompt bytes.Buffer
+	if err := t.Execute(&prompt, pr); err != nil {
+		return "", err
 	}
 
-	var reviewStrs []string
-	for _, review := range reviews {
-		reviewStrs = append(reviewStrs, fmt.Sprintf("%s: %s", review.User, review.State))
-	}
-	return strings.Join(reviewStrs, ", ")
+	return prompt.String(), nil
 }
 
 func (a *Agent) parseResponse(content string) *Analysis {
@@ -167,4 +156,3 @@ func (a *Agent) parseResponse(content string) *Analysis {
 
 	return analysis
 }
-
