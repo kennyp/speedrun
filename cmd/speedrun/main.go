@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 
 	tea "github.com/charmbracelet/bubbletea"
+	gap "github.com/muesli/go-app-paths"
 	"github.com/kennyp/speedrun/internal/ui"
 	"github.com/kennyp/speedrun/pkg/agent"
 	"github.com/kennyp/speedrun/pkg/cache"
@@ -23,17 +24,25 @@ import (
 func main() {
 	ctx := context.Background()
 
-	configDir, err := os.UserConfigDir()
+	// Create vendor-scoped paths using go-app-paths
+	scope := gap.NewVendorScope(gap.User, "kennyp", "speedrun")
+	
+	configPath, err := scope.ConfigPath("config.toml")
 	if err != nil {
-		log.Fatalf("cannot find config dir: %v", err)
+		log.Fatalf("cannot get config path: %v", err)
+	}
+	
+	cachePath, err := scope.DataPath("cache.db")
+	if err != nil {
+		log.Fatalf("cannot get cache path: %v", err)
+	}
+	
+	logPath, err := scope.LogPath("speedrun.log")
+	if err != nil {
+		log.Fatalf("cannot get log path: %v", err)
 	}
 
-	cacheDir, err := os.UserCacheDir()
-	if err != nil {
-		log.Fatalf("cannot find cache dir: %v", err)
-	}
-
-	configFile := altsrc.StringSourcer(filepath.Join(configDir, "speedrun", "config.toml"))
+	configFile := altsrc.StringSourcer(configPath)
 
 	app := cli.Command{
 		Name:    "speedrun",
@@ -45,7 +54,7 @@ func main() {
 			&cli.StringFlag{
 				Name:  "config",
 				Usage: "config file path",
-				Value: filepath.Join(configDir, "speedrun", "config.toml"),
+				Value: configPath,
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CONFIG"),
 				),
@@ -158,7 +167,7 @@ func main() {
 				Name:     "cache-path",
 				Usage:    "cache database file path",
 				Category: "Cache",
-				Value:    filepath.Join(cacheDir, "speedrun.db"),
+				Value:    cachePath,
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CACHE_PATH"),
 					toml.TOML("cache.path", configFile),
@@ -188,8 +197,9 @@ func main() {
 			},
 			&cli.StringFlag{
 				Name:     "log-path",
-				Usage:    "log file path (empty for stderr, defaults to cache dir/speedrun.log)",
+				Usage:    "log file path (empty for stderr)",
 				Category: "Logging",
+				Value:    logPath,
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_LOG_PATH"),
 					toml.TOML("log.path", configFile),
