@@ -10,6 +10,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/kennyp/speedrun/internal/ui"
 	"github.com/kennyp/speedrun/pkg/agent"
+	"github.com/kennyp/speedrun/pkg/cache"
 	"github.com/kennyp/speedrun/pkg/config"
 	"github.com/kennyp/speedrun/pkg/github"
 	"github.com/kennyp/speedrun/pkg/op"
@@ -217,8 +218,24 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		return fmt.Errorf("invalid configuration: %w", err)
 	}
 
+	// Initialize cache
+	cacheInstance, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAgeDays)
+	if err != nil {
+		return fmt.Errorf("failed to initialize cache: %w", err)
+	}
+	defer cacheInstance.Close()
+
+	// Cleanup expired cache entries on startup
+	if err := cacheInstance.Cleanup(); err != nil {
+		fmt.Printf("Warning: failed to cleanup cache: %v\n", err)
+	}
+
 	// Create GitHub client
-	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery)
+	githubChecksConfig := github.ChecksConfig{
+		Ignored:  cfg.Checks.Ignored,
+		Required: cfg.Checks.Required,
+	}
+	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery, cacheInstance, cfg.Backoff.GitHub, githubChecksConfig)
 	if err != nil {
 		return fmt.Errorf("failed to create GitHub client: %w", err)
 	}
@@ -235,7 +252,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	// Create AI agent if configured
 	var aiAgent *agent.Agent
 	if cfg.AI.Enabled {
-		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model)
+		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.Backoff.OpenAI)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
 	} else {
 		fmt.Printf("🤖 AI analysis disabled\n")

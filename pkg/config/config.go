@@ -5,15 +5,17 @@ import (
 	"strings"
 
 	"github.com/urfave/cli/v3"
+	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
 )
 
 // Config represents the complete speedrun configuration
 type Config struct {
-	GitHub GitHubConfig
-	AI     AIConfig
-	Checks ChecksConfig
-	Cache  CacheConfig
-	Op     OpConfig
+	GitHub  GitHubConfig
+	AI      AIConfig
+	Checks  ChecksConfig
+	Cache   CacheConfig
+	Op      OpConfig
+	Backoff backoffconfig.GlobalConfig
 }
 
 // GitHubConfig holds GitHub-related configuration
@@ -73,6 +75,7 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 			Enabled: cmd.Bool("op-enable"),
 			Account: cmd.String("op-account"),
 		},
+		Backoff: *backoffconfig.DefaultGlobalConfig(),
 	}
 }
 

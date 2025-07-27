@@ -132,6 +132,17 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
+		// Check for cached AI analysis first
+		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
+			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
+				return AIAnalysisLoadedMsg{
+					PRNumber: pr.Number,
+					Analysis: analysis,
+					Err:      nil,
+				}
+			}
+		}
+
 		// Convert github reviews to agent reviews
 		var agentReviews []agent.ReviewInfo
 		for _, review := range reviews {
@@ -153,6 +164,12 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		}
 
 		analysis, err := aiAgent.AnalyzePR(ctx, prData)
+		
+		// Cache the analysis result (even if there was an error)
+		if err == nil && analysis != nil {
+			pr.SetCachedAIAnalysis(analysis)
+		}
+
 		return AIAnalysisLoadedMsg{
 			PRNumber: pr.Number,
 			Analysis: analysis,

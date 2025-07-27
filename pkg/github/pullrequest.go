@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/google/go-github/v73/github"
 )
 
@@ -23,6 +24,61 @@ type PullRequest struct {
 
 	client *Client
 	ghi    *github.Issue
+}
+
+// Cache key helpers for PR data
+func (pr *PullRequest) diffStatsCacheKey() string {
+	return fmt.Sprintf("diff:%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+}
+
+func (pr *PullRequest) checkStatusCacheKey() string {
+	return fmt.Sprintf("checks:%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+}
+
+func (pr *PullRequest) reviewsCacheKey() string {
+	return fmt.Sprintf("reviews:%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+}
+
+func (pr *PullRequest) aiAnalysisCacheKey() string {
+	return fmt.Sprintf("ai:%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+}
+
+// invalidateCache removes all cached data for this PR
+func (pr *PullRequest) invalidateCache() {
+	if pr.client.cache == nil {
+		return
+	}
+
+	// Delete all cached data for this PR
+	pr.client.cache.Delete(pr.diffStatsCacheKey())
+	pr.client.cache.Delete(pr.checkStatusCacheKey())
+	pr.client.cache.Delete(pr.reviewsCacheKey())
+	pr.client.cache.Delete(pr.aiAnalysisCacheKey())
+}
+
+// GetCachedAIAnalysis retrieves cached AI analysis for this PR
+func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
+	if pr.client.cache == nil {
+		return nil, fmt.Errorf("cache not available")
+	}
+
+	var cachedAnalysis interface{}
+	cacheKey := pr.aiAnalysisCacheKey()
+	if err := pr.client.cache.Get(cacheKey, &cachedAnalysis); err != nil {
+		return nil, err
+	}
+
+	return cachedAnalysis, nil
+}
+
+// SetCachedAIAnalysis stores AI analysis in cache for this PR
+func (pr *PullRequest) SetCachedAIAnalysis(analysis interface{}) error {
+	if pr.client.cache == nil {
+		return fmt.Errorf("cache not available")
+	}
+
+	cacheKey := pr.aiAnalysisCacheKey()
+	return pr.client.cache.Set(cacheKey, analysis)
 }
 
 // newPullRequestFromIssue creates a PullRequest from a GitHub Issue
@@ -56,7 +112,25 @@ func newPullRequestFromIssue(client *Client, issue *github.Issue) (*PullRequest,
 
 // GetReviews returns the reviews for this PR
 func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
-	reviews, _, err := pr.client.client.PullRequests.ListReviews(ctx, pr.Owner, pr.Repo, pr.Number, nil)
+	cacheKey := pr.reviewsCacheKey()
+	
+	// Try to get from cache first
+	if pr.client.cache != nil {
+		var cachedReviews []*Review
+		if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
+			return cachedReviews, nil
+		}
+	}
+
+	var reviews []*github.PullRequestReview
+	operation := func() error {
+		var reviewErr error
+		reviews, _, reviewErr = pr.client.client.PullRequests.ListReviews(ctx, pr.Owner, pr.Repo, pr.Number, nil)
+		return reviewErr
+	}
+
+	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
+	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get reviews: %w", err)
 	}
@@ -69,6 +143,12 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 			Body:  review.GetBody(),
 		})
 	}
+
+	// Cache the results
+	if pr.client.cache != nil {
+		pr.client.cache.Set(cacheKey, result)
+	}
+
 	return result, nil
 }
 
@@ -89,8 +169,26 @@ func (pr *PullRequest) HasUserReviewed(ctx context.Context, username string) (bo
 
 // GetCheckStatus returns the combined check status for this PR
 func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error) {
+	cacheKey := pr.checkStatusCacheKey()
+	
+	// Try to get from cache first
+	if pr.client.cache != nil {
+		var cachedStatus *CheckStatus
+		if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
+			return cachedStatus, nil
+		}
+	}
+
 	// Get the PR details first to get the head SHA
-	prDetails, _, err := pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+	var prDetails *github.PullRequest
+	operation := func() error {
+		var getErr error
+		prDetails, _, getErr = pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+		return getErr
+	}
+
+	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
+	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR details: %w", err)
 	}
@@ -98,8 +196,24 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	pr.HeadSHA = prDetails.GetHead().GetSHA()
 
 	// Get both check runs (modern) and statuses (legacy)
-	checkRuns, _, _ := pr.client.client.Checks.ListCheckRunsForRef(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
-	statuses, _, _ := pr.client.client.Repositories.GetCombinedStatus(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
+	var checkRuns *github.ListCheckRunsResults
+	var statuses *github.CombinedStatus
+	
+	// Get check runs with retry
+	checkOperation := func() error {
+		var checkErr error
+		checkRuns, _, checkErr = pr.client.client.Checks.ListCheckRunsForRef(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
+		return checkErr
+	}
+	backoff.Retry(checkOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx))
+	
+	// Get statuses with retry
+	statusOperation := func() error {
+		var statusErr error
+		statuses, _, statusErr = pr.client.client.Repositories.GetCombinedStatus(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
+		return statusErr
+	}
+	backoff.Retry(statusOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx))
 
 	status := &CheckStatus{
 		Details: make([]CheckDetail, 0),
@@ -131,26 +245,60 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 		}
 	}
 
+	// Apply check filtering based on configuration
+	filteredDetails := pr.client.filterChecks(status.Details)
+	
 	// Determine overall status
-	status.State = aggregateCheckStates(status.Details)
-	status.Description = formatCheckDescription(status.Details)
+	status.State = aggregateCheckStates(filteredDetails)
+	status.Description = formatCheckDescription(filteredDetails)
+	status.Details = filteredDetails
+
+	// Cache the results
+	if pr.client.cache != nil {
+		pr.client.cache.Set(cacheKey, status)
+	}
 
 	return status, nil
 }
 
 // GetDiffStats returns the diff statistics for this PR
 func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
-	prDetails, _, err := pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+	cacheKey := pr.diffStatsCacheKey()
+	
+	// Try to get from cache first
+	if pr.client.cache != nil {
+		var cachedStats *DiffStats
+		if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
+			return cachedStats, nil
+		}
+	}
+
+	var prDetails *github.PullRequest
+	operation := func() error {
+		var getErr error
+		prDetails, _, getErr = pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+		return getErr
+	}
+
+	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
+	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get PR details: %w", err)
 	}
 
-	return &DiffStats{
+	stats := &DiffStats{
 		Additions: prDetails.GetAdditions(),
 		Deletions: prDetails.GetDeletions(),
 		Changes:   prDetails.GetChangedFiles(),
 		Files:     prDetails.GetChangedFiles(),
-	}, nil
+	}
+
+	// Cache the results
+	if pr.client.cache != nil {
+		pr.client.cache.Set(cacheKey, stats)
+	}
+
+	return stats, nil
 }
 
 // Approve approves this PR
@@ -164,6 +312,9 @@ func (pr *PullRequest) Approve(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("failed to approve PR: %w", err)
 	}
+
+	// Invalidate cache since PR state has changed
+	pr.invalidateCache()
 
 	return nil
 }

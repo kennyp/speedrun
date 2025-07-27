@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
 )
 
 // Recommendation represents the AI's recommendation for a PR
@@ -27,12 +29,13 @@ type Analysis struct {
 
 // Agent wraps the OpenAI client for PR analysis
 type Agent struct {
-	client *openai.Client
-	model  string
+	client        *openai.Client
+	model         string
+	backoffConfig backoffconfig.Config
 }
 
 // NewAgent creates a new AI agent
-func NewAgent(baseURL, apiKey, model string) *Agent {
+func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config) *Agent {
 	var opts []option.RequestOption
 
 	if baseURL != "" {
@@ -42,8 +45,9 @@ func NewAgent(baseURL, apiKey, model string) *Agent {
 	client := openai.NewClient(append(opts, option.WithAPIKey(apiKey))...)
 
 	return &Agent{
-		client: &client,
-		model:  model,
+		client:        &client,
+		model:         model,
+		backoffConfig: backoffConfig,
 	}
 }
 
@@ -51,13 +55,20 @@ func NewAgent(baseURL, apiKey, model string) *Agent {
 func (a *Agent) AnalyzePR(ctx context.Context, prData PRData) (*Analysis, error) {
 	prompt := a.buildPrompt(prData)
 
-	response, err := a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-		Messages: []openai.ChatCompletionMessageParamUnion{
-			openai.UserMessage(prompt),
-		},
-		Model: a.model,
-	})
+	var response *openai.ChatCompletion
+	operation := func() error {
+		var apiErr error
+		response, apiErr = a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+			Messages: []openai.ChatCompletionMessageParamUnion{
+				openai.UserMessage(prompt),
+			},
+			Model: a.model,
+		})
+		return apiErr
+	}
 
+	exponentialBackoff := a.backoffConfig.ToExponentialBackoff()
+	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	if err != nil {
 		return nil, fmt.Errorf("failed to get AI response: %w", err)
 	}
