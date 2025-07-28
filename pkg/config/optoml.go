@@ -2,6 +2,7 @@ package config
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"os"
 	"strconv"
@@ -24,50 +25,108 @@ func init() {
 }
 
 // OpTOMLValueSource creates a value source that processes 1Password references
-// before parsing TOML. It checks environment variables for 1Password settings
-// to avoid circular dependencies with CLI flags.
-func OpTOMLValueSource(key string, source altsrc.Sourcer) *altsrc.ValueSource {
-	return altsrc.NewValueSource(opTOMLUnmarshal, "op-toml", key, source)
+// before parsing TOML and properly handles slice types for urfave/cli compatibility.
+func OpTOMLValueSource(key string, source altsrc.Sourcer) *OpValueSource {
+	return &OpValueSource{
+		ValueSource: altsrc.NewValueSource(opTOMLUnmarshal, "op-toml", key, source),
+		key:         key,
+		source:      source,
+	}
 }
 
-// opTOMLUnmarshal unmarshals TOML data, processing 1Password references first if enabled
+// OpValueSource wraps altsrc.ValueSource to provide proper slice handling
+// and 1Password processing for TOML configuration files.
+type OpValueSource struct {
+	*altsrc.ValueSource
+	key    string
+	source altsrc.Sourcer
+}
+
+// Lookup implements the ValueSource interface with proper slice handling.
+// It processes 1Password references and converts TOML slices to comma-separated
+// strings that urfave/cli StringSlice flags can parse correctly.
+//
+// This custom implementation fixes a bug in urfave/cli-altsrc where TOML arrays
+// like ["heroku/compliance"] get converted to the literal string "[heroku/compliance]"
+// instead of being parsed as slice elements. See: https://github.com/urfave/cli-altsrc/issues/24
+//
+// Our solution uses a marshal/unmarshal technique to detect slice types and convert
+// them to comma-separated strings that StringSlice flags can parse naturally.
+func (ovs *OpValueSource) Lookup() (string, bool) {
+	// Use our 1Password-aware TOML unmarshal function
+	maafsc := altsrc.NewMapAnyAnyURISourceCache(ovs.source.SourceURI(), opTOMLUnmarshal)
+	if v, ok := altsrc.NestedVal(ovs.key, maafsc.Get()); ok {
+		// Try to handle as slice using marshal/unmarshal technique
+		vv := struct{ Value any }{v}
+		raw, err := toml.Marshal(vv)
+		if err != nil {
+			return fmt.Sprintf("%[1]v", v), ok
+		}
+
+		// Try to unmarshal as []string
+		vvs := struct{ Value []string }{}
+		if err := toml.Unmarshal(raw, &vvs); err == nil {
+			return strings.Join(vvs.Value, ","), ok
+		}
+
+		// Try to unmarshal as []int
+		vvi := struct{ Value []int }{}
+		if err := toml.Unmarshal(raw, &vvi); err == nil {
+			ss := make([]string, len(vvi.Value))
+			for i := range vvi.Value {
+				ss[i] = strconv.Itoa(vvi.Value[i])
+			}
+			return strings.Join(ss, ","), ok
+		}
+
+		// Fall back to standard string representation for non-slice types
+		return fmt.Sprintf("%[1]v", v), ok
+	}
+
+	return "", false
+}
+
+// opTOMLUnmarshal processes 1Password references in TOML data and then uses
+// the official toml.Unmarshal for proper type handling including slices.
 func opTOMLUnmarshal(data []byte, v any) error {
+
 	// Check if 1Password is enabled via environment variable
-	// This avoids circular dependency with CLI flags
 	opEnabled := getOpEnabledFromEnv()
 	opAccount := getOpAccountFromEnv()
 
-	if opEnabled {
-		rawContent := string(data)
-
-		// Check cache first to avoid repeated 1Password processing
-		opProcessingCacheMutex.RLock()
-		if cachedContent, exists := opProcessingCache[rawContent]; exists {
-			opProcessingCacheMutex.RUnlock()
-			return toml.Unmarshal([]byte(cachedContent), v)
-		}
-		opProcessingCacheMutex.RUnlock()
-
-		slog.Debug("1Password integration enabled, processing TOML file", "account", opAccount)
-
-		// Process 1Password references in the raw TOML data
-		processedData, err := processOpReferences(rawContent, opAccount)
-		if err != nil {
-			slog.Error("Failed to process 1Password references", "error", err)
-			// Fall back to original data if op processing fails
-			return toml.Unmarshal(data, v)
-		}
-
-		// Cache the processed result
-		opProcessingCacheMutex.Lock()
-		opProcessingCache[rawContent] = processedData
-		opProcessingCacheMutex.Unlock()
-
-		data = []byte(processedData)
-		slog.Debug("Successfully processed 1Password references in TOML")
+	if !opEnabled {
+		slog.Debug("1Password integration disabled, using raw TOML")
+		return toml.Unmarshal(data, v)
 	}
 
-	return toml.Unmarshal(data, v)
+	rawContent := string(data)
+
+	// Check cache first to avoid repeated 1Password processing
+	opProcessingCacheMutex.RLock()
+	if cachedContent, exists := opProcessingCache[rawContent]; exists {
+		opProcessingCacheMutex.RUnlock()
+		slog.Debug("Using cached 1Password-processed TOML content")
+		return toml.Unmarshal([]byte(cachedContent), v)
+	}
+	opProcessingCacheMutex.RUnlock()
+
+	slog.Debug("1Password integration enabled, processing TOML file", "account", opAccount)
+
+	// Process 1Password references in the raw TOML data
+	processedData, err := processOpReferences(rawContent, opAccount)
+	if err != nil {
+		slog.Error("Failed to process 1Password references", "error", err)
+		// Fall back to original data if op processing fails
+		return toml.Unmarshal(data, v)
+	}
+
+	// Cache the processed result
+	opProcessingCacheMutex.Lock()
+	opProcessingCache[rawContent] = processedData
+	opProcessingCacheMutex.Unlock()
+
+	slog.Debug("Successfully processed 1Password references in TOML")
+	return toml.Unmarshal([]byte(processedData), v)
 }
 
 // getOpEnabledFromEnv checks if 1Password is enabled via environment variables

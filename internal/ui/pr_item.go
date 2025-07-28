@@ -133,7 +133,6 @@ func (i PRItem) FilterValue() string {
 	return i.PR.Title
 }
 
-
 func getStatusEmoji(status string) string {
 	switch status {
 	case "success":

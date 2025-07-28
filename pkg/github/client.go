@@ -246,6 +246,12 @@ func (c *Client) filterChecks(details []CheckDetail) []CheckDetail {
 		return details
 	}
 
+	slog.Debug("Filtering checks",
+		slog.Int("total_checks", len(details)),
+		slog.Any("ignored_config", c.checksConfig.Ignored),
+		slog.Any("required_config", c.checksConfig.Required),
+	)
+
 	// If required checks are specified, only keep those
 	if len(c.checksConfig.Required) > 0 {
 		var filtered []CheckDetail
@@ -259,6 +265,7 @@ func (c *Client) filterChecks(details []CheckDetail) []CheckDetail {
 				filtered = append(filtered, detail)
 			}
 		}
+		slog.Debug("Applied required filter", slog.Int("filtered_count", len(filtered)))
 		return filtered
 	}
 
@@ -271,14 +278,25 @@ func (c *Client) filterChecks(details []CheckDetail) []CheckDetail {
 		}
 
 		for _, detail := range details {
-			if !ignoredMap[detail.Name] {
+			isIgnored := ignoredMap[detail.Name]
+			slog.Debug("Check filtering",
+				slog.String("check_name", detail.Name),
+				slog.String("check_status", detail.Status),
+				slog.Bool("is_ignored", isIgnored),
+			)
+			if !isIgnored {
 				filtered = append(filtered, detail)
 			}
 		}
+		slog.Debug("Applied ignored filter",
+			slog.Int("original_count", len(details)),
+			slog.Int("filtered_count", len(filtered)),
+		)
 		return filtered
 	}
 
 	// No filtering configured, return all
+	slog.Debug("No filtering configured, returning all checks")
 	return details
 }
 

@@ -20,21 +20,21 @@ type Config struct {
 
 // GitHubConfig holds GitHub-related configuration
 type GitHubConfig struct {
-	Token               string                       // GitHub personal access token
-	SearchQuery         string                       // GitHub search query for PRs
-	AutoMergeOnApproval string                       // Auto-merge behavior on approval: "true", "false", or "ask"
-	Backoff             backoffconfig.Config         // GitHub-specific backoff overrides
-	Client              ClientTimeoutConfig          // GitHub-specific client settings
+	Token               string               // GitHub personal access token
+	SearchQuery         string               // GitHub search query for PRs
+	AutoMergeOnApproval string               // Auto-merge behavior on approval: "true", "false", or "ask"
+	Backoff             backoffconfig.Config // GitHub-specific backoff overrides
+	Client              ClientTimeoutConfig  // GitHub-specific client settings
 }
 
 // AIConfig holds AI/LLM configuration
 type AIConfig struct {
-	Enabled bool                    // Should AI Reivew the PR
-	BaseURL string                  // LLM Gateway or API base URL
-	APIKey  string                  // API key for authentication
-	Model   string                  // Model to use (e.g., gpt-4)
-	Backoff backoffconfig.Config    // AI-specific backoff overrides
-	Client  ClientTimeoutConfig     // AI-specific client settings
+	Enabled bool                 // Should AI Reivew the PR
+	BaseURL string               // LLM Gateway or API base URL
+	APIKey  string               // API key for authentication
+	Model   string               // Model to use (e.g., gpt-4)
+	Backoff backoffconfig.Config // AI-specific backoff overrides
+	Client  ClientTimeoutConfig  // AI-specific client settings
 }
 
 // ChecksConfig holds CI check filtering configuration
@@ -101,6 +101,9 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 	githubClientTimeout := getDurationWithFallback(cmd, "github-client-timeout", globalClientTimeout)
 	aiClientTimeout := getDurationWithFallback(cmd, "ai-client-timeout", globalClientTimeout)
 
+	checksIgnored := cmd.StringSlice("checks-ignored")
+	checksRequired := cmd.StringSlice("checks-required")
+
 	return &Config{
 		GitHub: GitHubConfig{
 			Token:               cmd.String("github-token"),
@@ -118,8 +121,8 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 			Client:  ClientTimeoutConfig{Timeout: aiClientTimeout},
 		},
 		Checks: ChecksConfig{
-			Ignored:  cmd.StringSlice("checks-ignored"),
-			Required: cmd.StringSlice("checks-required"),
+			Ignored:  checksIgnored,
+			Required: checksRequired,
 		},
 		Cache: CacheConfig{
 			Path:   cmd.String("cache-path"),

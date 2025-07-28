@@ -516,6 +516,11 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		Ignored:  cfg.Checks.Ignored,
 		Required: cfg.Checks.Required,
 	}
+	slog.Debug("GitHub checks configuration",
+		slog.Any("ignored", githubChecksConfig.Ignored),
+		slog.Any("required", githubChecksConfig.Required),
+		slog.Int("ignored_len", len(githubChecksConfig.Ignored)),
+	)
 	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery, cacheInstance, cfg.GitHub.Backoff, githubChecksConfig)
 	if err != nil {
 		slog.Error("Failed to create GitHub client", "error", err)
