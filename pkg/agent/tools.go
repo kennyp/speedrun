@@ -83,7 +83,7 @@ func (t *GitHubTool) Name() string {
 }
 
 func (t *GitHubTool) Description() string {
-	return "Access GitHub API to get PR details, diffs, file contents, and comments"
+	return "Access GitHub API to get PR details, diffs, file contents, and comments. Essential for dependency updates: check PR comments for links to release notes, changelogs, and security advisories. Use get_pr_comments to find upstream information that explains what changed between versions."
 }
 
 func (t *GitHubTool) Parameters() json.RawMessage {
@@ -93,7 +93,7 @@ func (t *GitHubTool) Parameters() json.RawMessage {
 			"action": map[string]interface{}{
 				"type": "string",
 				"enum": []string{"get_pr_details", "get_pr_diff", "get_file_content", "get_pr_comments"},
-				"description": "The action to perform",
+				"description": "The action to perform: get_pr_details for basic info, get_pr_diff for code changes, get_file_content for specific files, get_pr_comments for links to release notes/changelogs",
 			},
 			"owner": map[string]interface{}{
 				"type": "string",
@@ -167,7 +167,7 @@ func (t *WebFetchTool) Name() string {
 }
 
 func (t *WebFetchTool) Description() string {
-	return "Fetch content from a URL (e.g., linked issues, documentation)"
+	return "Fetch content from URLs including release notes, changelogs, security advisories, and documentation. Critical for dependency analysis: fetch upstream project information to understand what actually changed, not just the diff size. Look for links in PR descriptions and comments."
 }
 
 func (t *WebFetchTool) Parameters() json.RawMessage {
@@ -233,7 +233,7 @@ func (t *DiffAnalyzerTool) Name() string {
 }
 
 func (t *DiffAnalyzerTool) Description() string {
-	return "Analyze a diff for sensitive file changes and modified paths"
+	return "Analyze diffs for sensitive file changes and modified paths. For dependency updates: use to distinguish between vendored dependency files (which should be ignored) and actual source code changes. Focus analysis on non-vendor paths to identify real code changes."
 }
 
 func (t *DiffAnalyzerTool) Parameters() json.RawMessage {
@@ -247,7 +247,7 @@ func (t *DiffAnalyzerTool) Parameters() json.RawMessage {
 			"analysis_type": map[string]interface{}{
 				"type": "string",
 				"enum": []string{"sensitive_files", "modified_paths"},
-				"description": "Type of analysis to perform",
+				"description": "Type of analysis: sensitive_files to detect security-related changes, modified_paths to list all changed files (useful for filtering out vendor/dependencies)",
 			},
 		},
 		"required": []string{"diff", "analysis_type"},
