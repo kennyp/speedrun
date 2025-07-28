@@ -87,25 +87,22 @@ func (pr *PullRequest) InvalidateCommitRelatedCache() {
 	}
 }
 
+// AIAnalysis interface for cached analysis data (following Go proverb: accept interfaces, return concrete types)
+type AIAnalysis interface {
+	GetRecommendation() string
+	GetReasoning() string
+	GetRiskLevel() string
+}
+
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR
-func (pr *PullRequest) GetCachedAIAnalysis() (any, error) {
-
-	var cachedAnalysis any
+func (pr *PullRequest) GetCachedAIAnalysis(dest AIAnalysis) error {
 	cacheKey := pr.aiAnalysisCacheKey()
-	if err := pr.client.cache.Get(cacheKey, &cachedAnalysis); err != nil {
-		return nil, err
+	if err := pr.client.cache.Get(cacheKey, dest); err != nil {
+		return err
 	}
 
-	// Validate cached AI analysis - if it's nil, delete the bad cache entry
-	if cachedAnalysis == nil {
-		slog.Debug("Deleting invalid cached AI analysis (nil)", slog.Any("pr", pr))
-		if err := pr.client.cache.Delete(cacheKey); err != nil {
-			slog.Debug("Failed to delete invalid AI analysis cache", slog.Any("error", err))
-		}
-		return nil, fmt.Errorf("cached AI analysis was invalid")
-	}
-
-	return cachedAnalysis, nil
+	slog.Debug("AI analysis retrieved from cache", slog.Any("pr", pr), slog.String("recommendation", dest.GetRecommendation()), slog.String("risk", dest.GetRiskLevel()))
+	return nil
 }
 
 // SetCachedAIAnalysis stores AI analysis in cache for this PR
@@ -122,7 +119,7 @@ func (pr *PullRequest) SetCachedAIAnalysis(analysis any) error {
 }
 
 // newPullRequestFromIssue creates a PullRequest from a GitHub Issue
-func newPullRequestFromIssue(client *Client, issue *github.Issue) (*PullRequest, error) {
+func newPullRequestFromIssue(ctx context.Context, client *Client, issue *github.Issue) (*PullRequest, error) {
 	pr := &PullRequest{
 		Number:    issue.GetNumber(),
 		Title:     issue.GetTitle(),
@@ -146,6 +143,31 @@ func newPullRequestFromIssue(client *Client, issue *github.Issue) (*PullRequest,
 	}
 	pr.Owner = parts[2]
 	pr.Repo = parts[3]
+
+	// Fetch HeadSHA immediately to enable proper AI analysis caching
+	// This ensures AI cache keys are available from the start
+	slog.Debug("Fetching HeadSHA during PR creation", slog.Any("pr", pr))
+	start := time.Now()
+	
+	var prDetails *github.PullRequest
+	operation := func() error {
+		var getErr error
+		prDetails, _, getErr = client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+		return getErr
+	}
+
+	exponentialBackoff := client.backoffConfig.ToExponentialBackoff()
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+		duration := time.Since(start)
+		slog.Debug("Failed to get HeadSHA during PR creation", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
+		// Don't fail PR creation if we can't get HeadSHA - it can be fetched later
+		// This maintains backward compatibility
+		return pr, nil
+	}
+
+	pr.HeadSHA = prDetails.GetHead().GetSHA()
+	duration := time.Since(start)
+	slog.Debug("Successfully fetched HeadSHA during PR creation", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA), slog.Duration("duration", duration))
 
 	return pr, nil
 }

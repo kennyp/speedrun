@@ -41,6 +41,19 @@ type Analysis struct {
 	RiskLevel      string
 }
 
+// Implement AIAnalysis interface
+func (a *Analysis) GetRecommendation() string {
+	return string(a.Recommendation)
+}
+
+func (a *Analysis) GetReasoning() string {
+	return a.Reasoning
+}
+
+func (a *Analysis) GetRiskLevel() string {
+	return a.RiskLevel
+}
+
 // Agent wraps the OpenAI client for PR analysis
 type Agent struct {
 	client        *openai.Client

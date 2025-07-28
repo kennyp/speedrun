@@ -100,9 +100,33 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 	// Try to get from cache first
 	var cachedPRs []*PullRequest
 	if err := c.cache.Get(cacheKey, &cachedPRs); err == nil {
-			// Restore client field for cached PRs since it's not serialized
+			// Restore client field and populate HeadSHA for cached PRs
 			for _, pr := range cachedPRs {
 				pr.client = c
+				
+				// Populate HeadSHA if missing (for proper AI analysis caching)
+				if pr.HeadSHA == "" {
+					slog.Debug("Fetching HeadSHA for cached PR", slog.Any("pr", pr))
+					headSHAStart := time.Now()
+					
+					var prDetails *github.PullRequest
+					operation := func() error {
+						var getErr error
+						prDetails, _, getErr = c.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+						return getErr
+					}
+
+					exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+					if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+						headSHADuration := time.Since(headSHAStart)
+						slog.Debug("Failed to get HeadSHA for cached PR", slog.Any("pr", pr), slog.Duration("duration", headSHADuration), slog.Any("error", err))
+						// Continue with empty HeadSHA - it can be fetched later
+					} else {
+						pr.HeadSHA = prDetails.GetHead().GetSHA()
+						headSHADuration := time.Since(headSHAStart)
+						slog.Debug("Successfully fetched HeadSHA for cached PR", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA), slog.Duration("duration", headSHADuration))
+					}
+				}
 			}
 			duration := time.Since(start)
 			slog.Debug("Retrieved PRs from cache", slog.String("query", c.searchQuery), slog.Int("count", len(cachedPRs)), slog.Duration("duration", duration))
@@ -147,7 +171,7 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 			continue
 		}
 
-		pr, err := newPullRequestFromIssue(c, issue)
+		pr, err := newPullRequestFromIssue(ctx, c, issue)
 		if err != nil {
 			slog.Debug("Failed to create PR from issue", slog.String("issue_number", fmt.Sprintf("%d", issue.GetNumber())), slog.Any("error", err))
 			continue
@@ -209,7 +233,7 @@ func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, e
 			continue
 		}
 
-		pr, err := newPullRequestFromIssue(c, issue)
+		pr, err := newPullRequestFromIssue(ctx, c, issue)
 		if err != nil {
 			slog.Debug("Failed to create PR from issue", slog.String("issue_number", fmt.Sprintf("%d", issue.GetNumber())), slog.Any("error", err))
 			continue

@@ -275,16 +275,15 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		defer cancel()
 
 		// Check for cached AI analysis first
-		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
-			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
-				duration := time.Since(start)
-				slog.Debug("AI analysis loaded from cache", slog.Any("pr", pr), slog.Duration("duration", duration),
-					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
-				return AIAnalysisLoadedMsg{
-					PRID:     prID,
-					Analysis: analysis,
-					Err:      nil,
-				}
+		var cachedAnalysis agent.Analysis
+		if err := pr.GetCachedAIAnalysis(&cachedAnalysis); err == nil {
+			duration := time.Since(start)
+			slog.Debug("AI analysis loaded from cache", slog.Any("pr", pr), slog.Duration("duration", duration),
+				slog.Any("recommendation", cachedAnalysis.Recommendation), slog.String("risk", cachedAnalysis.RiskLevel))
+			return AIAnalysisLoadedMsg{
+				PRID:     prID,
+				Analysis: &cachedAnalysis,
+				Err:      nil,
 			}
 		}
 
@@ -352,15 +351,14 @@ func FetchCachedAIAnalysisCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 		slog.Debug("Loading cached AI analysis", slog.Any("pr", pr))
 
 		// Check for cached AI analysis
-		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
-			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
-				slog.Debug("Cached AI analysis found", slog.Any("pr", pr),
-					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
-				return AIAnalysisLoadedMsg{
-					PRID:     prID,
-					Analysis: analysis,
-					Err:      nil,
-				}
+		var cachedAnalysis agent.Analysis
+		if err := pr.GetCachedAIAnalysis(&cachedAnalysis); err == nil {
+			slog.Debug("Cached AI analysis found", slog.Any("pr", pr),
+				slog.Any("recommendation", cachedAnalysis.Recommendation), slog.String("risk", cachedAnalysis.RiskLevel))
+			return AIAnalysisLoadedMsg{
+				PRID:     prID,
+				Analysis: &cachedAnalysis,
+				Err:      nil,
 			}
 		}
 
