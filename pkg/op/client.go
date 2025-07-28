@@ -42,10 +42,6 @@ func (c *Client) SignIn(ctx context.Context) error {
 
 // Inject resolves op:// references in a template string
 func (c *Client) Inject(ctx context.Context, template string) (string, error) {
-	if !strings.HasPrefix(template, "op://") {
-		return template, nil
-	}
-
 	args := c.defaultArgs()
 	args = append(args, "inject")
 

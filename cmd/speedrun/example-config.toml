@@ -1,0 +1,44 @@
+# Speedrun Configuration
+# Any string value can use 1Password references: op://vault/item/field
+#
+# 1Password settings are controlled via environment variables:
+# - SPEEDRUN_OP_DISABLE: set to true/false to disable 1Password integration
+# - SPEEDRUN_OP_ACCOUNT or OP_ACCOUNT: specify 1Password account
+
+[github]
+# GitHub personal access token
+# token = "ghp_..." or "op://vault/GitHub/token"
+# Search query for finding PRs
+search_query = "is:open is:pr org:heroku label:on-call"
+# Auto-merge behavior on PR approval: "true", "false", or "ask"
+auto_merge_on_approval = "ask"
+
+[ai]
+# Enable AI-powered PR analysis
+enabled = false
+# LLM Gateway or API base URL
+# base_url = "https://api.openai.com/v1"
+# API key
+# api_key = "sk-..." or "op://vault/OpenAI/api-key"
+model = "gpt-4"
+
+[checks]
+# CI checks to ignore when determining status
+ignored = ["heroku/compliance"]
+# If specified, only these checks matter
+# required = []
+
+[cache]
+# Maximum age of cache entries (e.g., 7d, 24h, 168h)
+max_age = "7d"
+# Custom cache database file path
+# path = "/custom/cache/speedrun/cache.db"
+
+[log]
+# Log level: debug, info, warn, error
+level = "info"
+# Log file path:
+#   - Empty or "default": uses system log directory
+#   - "-" or "stderr": writes to stderr
+#   - Custom path: writes to specified file
+# path = "/custom/log/speedrun/speedrun.log"

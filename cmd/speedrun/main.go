@@ -2,11 +2,14 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"fmt"
 	"log"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	gap "github.com/muesli/go-app-paths"
@@ -15,11 +18,12 @@ import (
 	"github.com/kennyp/speedrun/pkg/cache"
 	"github.com/kennyp/speedrun/pkg/config"
 	"github.com/kennyp/speedrun/pkg/github"
-	"github.com/kennyp/speedrun/pkg/op"
 	"github.com/urfave/cli-altsrc/v3"
-	"github.com/urfave/cli-altsrc/v3/toml"
 	"github.com/urfave/cli/v3"
 )
+
+//go:embed example-config.toml
+var defaultConfigTemplate string
 
 func main() {
 	ctx := context.Background()
@@ -45,10 +49,11 @@ func main() {
 	configFile := altsrc.StringSourcer(configPath)
 
 	app := cli.Command{
-		Name:    "speedrun",
-		Usage:   "AI-powered PR review tool for on-call engineers",
-		Version: "0.1.0",
-		Authors: []any{"Kenny Parnell <k.parnell@gmail.com>"},
+		Name:        "speedrun",
+		Usage:       "AI-powered PR review tool for on-call engineers",
+		Description: "All string configuration values support 1Password references (op://vault/item/field).\n\n1Password settings are controlled via environment variables:\n  SPEEDRUN_OP_DISABLE - disable 1Password integration (any truthy value)\n  SPEEDRUN_OP_ACCOUNT or OP_ACCOUNT - specify 1Password account",
+		Version:     "0.1.0",
+		Authors:     []any{"Kenny Parnell <k.parnell@gmail.com>"},
 		Flags: []cli.Flag{
 			// Configuration
 			&cli.StringFlag{
@@ -63,11 +68,11 @@ func main() {
 			// GitHub settings
 			&cli.StringFlag{
 				Name:     "github-token",
-				Usage:    "GitHub personal access token (or op:// reference)",
+				Usage:    "GitHub personal access token",
 				Category: "GitHub",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_GITHUB_TOKEN"),
-					toml.TOML("github.token", configFile),
+					config.OpTOMLValueSource("github.token", configFile),
 				),
 			},
 			&cli.StringFlag{
@@ -77,7 +82,7 @@ func main() {
 				Value:    "is:open is:pr",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_GITHUB_SEARCH_QUERY"),
-					toml.TOML("github.search_query", configFile),
+					config.OpTOMLValueSource("github.search_query", configFile),
 				),
 			},
 
@@ -88,7 +93,7 @@ func main() {
 				Category: "AI",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_AI_ENABLED"),
-					toml.TOML("ai.enabled", configFile),
+					config.OpTOMLValueSource("ai.enabled", configFile),
 				),
 			},
 			&cli.StringFlag{
@@ -97,16 +102,16 @@ func main() {
 				Category: "AI",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_AI_BASE_URL"),
-					toml.TOML("ai.base_url", configFile),
+					config.OpTOMLValueSource("ai.base_url", configFile),
 				),
 			},
 			&cli.StringFlag{
 				Name:     "ai-api-key",
-				Usage:    "AI API key (or op:// reference)",
+				Usage:    "AI API key",
 				Category: "AI",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_AI_API_KEY"),
-					toml.TOML("ai.api_key", configFile),
+					config.OpTOMLValueSource("ai.api_key", configFile),
 				),
 			},
 			&cli.StringFlag{
@@ -116,7 +121,7 @@ func main() {
 				Value:    "gpt-4",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_AI_MODEL"),
-					toml.TOML("ai.model", configFile),
+					config.OpTOMLValueSource("ai.model", configFile),
 				),
 			},
 
@@ -127,7 +132,7 @@ func main() {
 				Category: "Checks",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CHECKS_IGNORED"),
-					toml.TOML("checks.ignored", configFile),
+					config.OpTOMLValueSource("checks.ignored", configFile),
 				),
 			},
 			&cli.StringSliceFlag{
@@ -136,31 +141,10 @@ func main() {
 				Category: "Checks",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CHECKS_REQUIRED"),
-					toml.TOML("checks.required", configFile),
+					config.OpTOMLValueSource("checks.required", configFile),
 				),
 			},
 
-			// 1Password settings
-			&cli.BoolWithInverseFlag{
-				Name:     "op-enable",
-				Usage:    "enable 1Password integration for secrets",
-				Category: "1Password",
-				Value:    true,
-				Sources: cli.NewValueSourceChain(
-					cli.EnvVar("SPEEDRUN_OP_ENABLE"),
-					toml.TOML("op.enabled", configFile),
-				),
-			},
-			&cli.StringFlag{
-				Name:     "op-account",
-				Usage:    "1Password account",
-				Category: "1Password",
-				Sources: cli.NewValueSourceChain(
-					cli.EnvVar("SPEEDRUN_OP_ACCOUNT"),
-					cli.EnvVar("OP_ACCOUNT"),
-					toml.TOML("op.account", configFile),
-				),
-			},
 
 			// Cache settings
 			&cli.StringFlag{
@@ -170,17 +154,17 @@ func main() {
 				Value:    cachePath,
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_CACHE_PATH"),
-					toml.TOML("cache.path", configFile),
+					config.OpTOMLValueSource("cache.path", configFile),
 				),
 			},
-			&cli.IntFlag{
-				Name:     "cache-max-age-days",
-				Usage:    "maximum age of cache entries in days",
+			&cli.DurationFlag{
+				Name:     "cache-max-age",
+				Usage:    "maximum age of cache entries (e.g., 7d, 24h, 168h)",
 				Category: "Cache",
-				Value:    7,
+				Value:    7 * 24 * time.Hour, // 7 days
 				Sources: cli.NewValueSourceChain(
-					cli.EnvVar("SPEEDRUN_CACHE_MAX_AGE_DAYS"),
-					toml.TOML("cache.max_age_days", configFile),
+					cli.EnvVar("SPEEDRUN_CACHE_MAX_AGE"),
+					config.OpTOMLValueSource("cache.max_age", configFile),
 				),
 			},
 
@@ -192,17 +176,29 @@ func main() {
 				Value:    "info",
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_LOG_LEVEL"),
-					toml.TOML("log.level", configFile),
+					config.OpTOMLValueSource("log.level", configFile),
 				),
 			},
 			&cli.StringFlag{
 				Name:     "log-path",
-				Usage:    "log file path (empty for stderr)",
+				Usage:    "log file path (empty for default, '-' or 'stderr' for stderr)",
 				Category: "Logging",
 				Value:    logPath,
 				Sources: cli.NewValueSourceChain(
 					cli.EnvVar("SPEEDRUN_LOG_PATH"),
-					toml.TOML("log.path", configFile),
+					config.OpTOMLValueSource("log.path", configFile),
+				),
+			},
+
+			// Auto-merge settings
+			&cli.StringFlag{
+				Name:     "auto-merge-on-approval",
+				Usage:    "Auto-merge behavior on PR approval (true, false, ask)",
+				Category: "Auto-merge",
+				Value:    "ask",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AUTO_MERGE_ON_APPROVAL"),
+					config.OpTOMLValueSource("github.auto_merge_on_approval", configFile),
 				),
 			},
 		},
@@ -212,6 +208,13 @@ func main() {
 				Name:   "init",
 				Usage:  "Initialize speedrun configuration",
 				Action: initConfig,
+				Flags: []cli.Flag{
+					&cli.BoolFlag{
+						Name:    "edit",
+						Aliases: []string{"e"},
+						Usage:   "open config file in $EDITOR after creation",
+					},
+				},
 			},
 		},
 	}
@@ -219,6 +222,17 @@ func main() {
 	if err := app.Run(ctx, os.Args); err != nil {
 		log.Fatal(err)
 	}
+}
+
+// maskToken masks sensitive tokens for logging, showing only first 8 and last 4 characters
+func maskToken(token string) string {
+	if token == "" {
+		return "<empty>"
+	}
+	if len(token) <= 12 {
+		return "***"
+	}
+	return token[:8] + "..." + token[len(token)-4:]
 }
 
 func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
@@ -240,29 +254,34 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		level = slog.LevelInfo
 	}
 	
-	// Determine log output
+	// Determine log output using Unix conventions
 	var logWriter *os.File
-	if cfg.Log.Path == "" {
-		// Default to speedrun.log in cache directory
-		logPath := filepath.Join(cfg.Cache.Path, "speedrun.log")
-		// Create cache directory if it doesn't exist
-		if err := os.MkdirAll(cfg.Cache.Path, 0755); err != nil {
-			// Fall back to stderr if we can't create cache dir
-			logWriter = os.Stderr
-		} else {
-			var err error
-			logWriter, err = os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-			if err != nil {
-				// Fall back to stderr if we can't open log file
-				logWriter = os.Stderr
-			}
+	var err error
+	
+	switch cfg.Log.Path {
+	case "", "default":
+		// Use default log path when unset
+		defaultLogPath := filepath.Join(filepath.Dir(cfg.Cache.Path), "speedrun.log")
+		// Create log directory if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(defaultLogPath), 0755); err != nil {
+			return fmt.Errorf("failed to create log directory: %w", err)
 		}
-	} else {
-		var err error
+		logWriter, err = os.OpenFile(defaultLogPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to open default log file %s: %w", defaultLogPath, err)
+		}
+	case "-", "stderr":
+		// Explicitly use stderr
+		logWriter = os.Stderr
+	default:
+		// Use specified log file path
+		// Create log directory if it doesn't exist
+		if err := os.MkdirAll(filepath.Dir(cfg.Log.Path), 0755); err != nil {
+			return fmt.Errorf("failed to create log directory for %s: %w", cfg.Log.Path, err)
+		}
 		logWriter, err = os.OpenFile(cfg.Log.Path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 		if err != nil {
-			// Fall back to stderr if we can't open specified log file
-			logWriter = os.Stderr
+			return fmt.Errorf("failed to open log file %s: %w", cfg.Log.Path, err)
 		}
 	}
 	
@@ -272,31 +291,22 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	
 	slog.Debug("Starting speedrun", "log_level", cfg.Log.Level, "log_path", cfg.Log.Path)
 
-	// Resolve 1Password references if enabled
-	if cfg.Op.Enabled {
-		slog.Debug("1Password integration enabled")
-		opClient := op.New(cfg.Op.Account)
+	// Note: 1Password references are now resolved automatically during config parsing
+	// via OpTOMLValueSource, so no need for manual ResolveSecrets() call
 
-		// Check if op CLI is available
-		if !opClient.Available() {
-			slog.Error("1Password CLI (op) is not installed or not in PATH")
-			return fmt.Errorf("1Password CLI (op) is not installed or not in PATH")
-		}
-
-		// Sign in to 1Password
-		slog.Debug("Signing in to 1Password...")
-		if err := opClient.SignIn(ctx); err != nil {
-			slog.Error("Failed to sign in to 1Password", "error", err)
-			return fmt.Errorf("failed to sign in to 1Password: %w", err)
-		}
-
-		// Resolve secrets
-		slog.Debug("Resolving secrets from 1Password...")
-		if err := cfg.ResolveSecrets(ctx, opClient); err != nil {
-			slog.Error("Failed to resolve secrets", "error", err)
-			return fmt.Errorf("failed to resolve secrets: %w", err)
-		}
-		slog.Info("Successfully resolved secrets from 1Password")
+	// Debug logging if SPEEDRUN_DEBUG is set
+	if os.Getenv("SPEEDRUN_DEBUG") != "" {
+		slog.Debug("Configuration after processing",
+			"github.token", maskToken(cfg.GitHub.Token),
+			"github.search_query", cfg.GitHub.SearchQuery,
+			"ai.enabled", cfg.AI.Enabled,
+			"ai.base_url", cfg.AI.BaseURL,
+			"ai.api_key", maskToken(cfg.AI.APIKey),
+			"ai.model", cfg.AI.Model,
+			"cache.path", cfg.Cache.Path,
+			"log.level", cfg.Log.Level,
+			"log.path", cfg.Log.Path,
+		)
 	}
 
 	// Validate configuration
@@ -307,8 +317,8 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Initialize cache
-	slog.Debug("Initializing cache", "path", cfg.Cache.Path, "max_age_days", cfg.Cache.MaxAgeDays)
-	cacheInstance, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAgeDays)
+	slog.Debug("Initializing cache", "path", cfg.Cache.Path, "max_age", cfg.Cache.MaxAge)
+	cacheInstance, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAge)
 	if err != nil {
 		slog.Error("Failed to initialize cache", "error", err)
 		return fmt.Errorf("failed to initialize cache: %w", err)
@@ -379,57 +389,54 @@ func initConfig(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Check if config already exists
+	configExists := false
 	if _, err := os.Stat(configPath); err == nil {
+		configExists = true
 		fmt.Printf("Config file already exists at %s\n", configPath)
-		return nil
 	}
 
-	// Create default config
-	defaultConfig := `# Speedrun Configuration
-
-[github]
-# GitHub personal access token (or op:// reference)
-# token = "ghp_..." or "op://vault/GitHub/token"
-# Search query for finding PRs
-search_query = "is:open is:pr org:heroku label:on-call"
-
-[ai]
-# LLM Gateway or API base URL
-# base_url = "https://api.openai.com/v1"
-# API key (or op:// reference)
-# api_key = "sk-..." or "op://vault/OpenAI/api-key"
-model = "gpt-4"
-
-[checks]
-# CI checks to ignore when determining status
-ignored = ["heroku/compliance"]
-# If specified, only these checks matter
-# required = []
-
-[op]
-# Enable 1Password integration
-enabled = true
-# 1Password account (if different from default)
-# account = "company.1password.com"
-
-[cache]
-# Maximum age of cache entries in days
-max_age_days = 7
-# Custom cache database file path (defaults to system cache dir/speedrun.db)
-# path = "/custom/cache/speedrun.db"
-
-[log]
-# Log level: debug, info, warn, error
-level = "info"
-# Log file path (defaults to cache_dir/speedrun.log, empty for stderr)
-# path = "/custom/log/path/speedrun.log"
-`
-
-	if err := os.WriteFile(configPath, []byte(defaultConfig), 0644); err != nil {
-		return fmt.Errorf("failed to write config file: %w", err)
+	// Write the embedded config template to file only if it doesn't exist
+	if !configExists {
+		if err := os.WriteFile(configPath, []byte(defaultConfigTemplate), 0644); err != nil {
+			return fmt.Errorf("failed to write config file: %w", err)
+		}
+		fmt.Printf("Created default config at %s\n", configPath)
 	}
-
-	fmt.Printf("Created default config at %s\n", configPath)
-	fmt.Println("Please edit the config file to add your GitHub token and AI API key.")
+	
+	// Open in editor if --edit flag is provided
+	if cmd.Bool("edit") {
+		editor := os.Getenv("EDITOR")
+		if editor == "" {
+			// Try common editors as fallbacks
+			for _, fallback := range []string{"vim", "vi", "nano", "code", "subl"} {
+				if _, err := exec.LookPath(fallback); err == nil {
+					editor = fallback
+					break
+				}
+			}
+		}
+		
+		if editor == "" {
+			fmt.Println("No suitable editor found. Please set the $EDITOR environment variable.")
+			fmt.Println("Please edit the config file to add your GitHub token and AI API key.")
+			return nil
+		}
+		
+		fmt.Printf("Opening config in %s...\n", editor)
+		cmd := exec.Command(editor, configPath)
+		cmd.Stdin = os.Stdin
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+		
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("Failed to open editor: %v\n", err)
+			if !configExists {
+				fmt.Println("Please edit the config file manually to add your GitHub token and AI API key.")
+			}
+		}
+	} else if !configExists {
+		fmt.Println("Please edit the config file to add your GitHub token and AI API key.")
+	}
+	
 	return nil
 }

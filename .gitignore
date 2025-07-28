@@ -4,7 +4,16 @@
 *.db
 
 # Ignore bins
-/bin/speedrun
+/bin/
 
 # Ignore the research directory since that's where I play around with concepts
 /research
+
+# macOS
+.DS_Store
+
+# Tracing files
+trace.txt
+
+# Mise configuration (user-specific)
+mise.local.toml

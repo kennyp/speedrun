@@ -28,8 +28,8 @@ type CacheEntry struct {
 }
 
 // New creates a new cache instance
-func New(dbPath string, maxAgeDays int) (*Cache, error) {
-	slog.Debug("Creating cache", "path", dbPath, "max_age_days", maxAgeDays)
+func New(dbPath string, maxAge time.Duration) (*Cache, error) {
+	slog.Debug("Creating cache", "path", dbPath, "max_age", maxAge)
 	
 	// Ensure parent directory exists
 	cacheDir := filepath.Dir(dbPath)
@@ -45,7 +45,7 @@ func New(dbPath string, maxAgeDays int) (*Cache, error) {
 
 	cache := &Cache{
 		db:     db,
-		maxAge: time.Duration(maxAgeDays) * 24 * time.Hour,
+		maxAge: maxAge,
 		dbPath: dbPath,
 	}
 

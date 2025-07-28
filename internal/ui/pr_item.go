@@ -9,6 +9,7 @@ import (
 
 // PRItem represents a PR in the list
 type PRItem struct {
+	ID          int64               // Unique atomic ID for this PR item
 	PR          *github.PullRequest
 	DiffStats   *github.DiffStats
 	CheckStatus *github.CheckStatus

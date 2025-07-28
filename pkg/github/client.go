@@ -29,6 +29,7 @@ type ChecksConfig struct {
 // Client wraps the GitHub API client
 type Client struct {
 	client        *github.Client
+	graphqlClient *GraphQLClient
 	searchQuery   string
 	token         string
 	cache         Cache
@@ -48,9 +49,11 @@ func NewClient(ctx context.Context, token, searchQuery string, cache Cache, back
 	}
 
 	client := github.NewClient(nil).WithAuthToken(token)
+	graphqlClient := NewGraphQLClient(token)
 	
 	return &Client{
 		client:        client,
+		graphqlClient: graphqlClient,
 		searchQuery:   searchQuery,
 		token:         token,
 		cache:         cache,
@@ -273,4 +276,24 @@ func (c *Client) filterChecks(details []CheckDetail) []CheckDetail {
 
 	// No filtering configured, return all
 	return details
+}
+
+// EnableAutoMerge enables auto-merge for a pull request
+func (c *Client) EnableAutoMerge(ctx context.Context, owner, repo string, number int, mergeMethod string) error {
+	slog.Debug("Enabling auto-merge for PR", "owner", owner, "repo", repo, "number", number, "merge_method", mergeMethod)
+	
+	// Get the GraphQL node ID for the pull request
+	nodeID, err := c.graphqlClient.GetPullRequestNodeID(ctx, owner, repo, number)
+	if err != nil {
+		return fmt.Errorf("failed to get PR node ID: %w", err)
+	}
+	
+	// Enable auto-merge using GraphQL
+	_, err = c.graphqlClient.EnableAutoMerge(ctx, nodeID, mergeMethod)
+	if err != nil {
+		return fmt.Errorf("failed to enable auto-merge: %w", err)
+	}
+	
+	slog.Info("Auto-merge enabled successfully", "owner", owner, "repo", repo, "number", number, "merge_method", mergeMethod)
+	return nil
 }

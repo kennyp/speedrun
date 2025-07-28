@@ -2,6 +2,7 @@ package ui
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -20,36 +21,42 @@ type PRsLoadedMsg struct {
 
 // DiffStatsLoadedMsg is sent when diff stats have been loaded for a PR
 type DiffStatsLoadedMsg struct {
-	PRNumber int
-	Stats    *github.DiffStats
-	Err      error
+	PRID  int64
+	Stats *github.DiffStats
+	Err   error
 }
 
 // CheckStatusLoadedMsg is sent when check status has been loaded for a PR
 type CheckStatusLoadedMsg struct {
-	PRNumber int
-	Status   *github.CheckStatus
-	Err      error
+	PRID   int64
+	Status *github.CheckStatus
+	Err    error
 }
 
 // ReviewsLoadedMsg is sent when reviews have been loaded for a PR
 type ReviewsLoadedMsg struct {
-	PRNumber int
-	Reviews  []*github.Review
-	Err      error
+	PRID    int64
+	Reviews []*github.Review
+	Err     error
 }
 
 // AIAnalysisLoadedMsg is sent when AI analysis has been completed for a PR
 type AIAnalysisLoadedMsg struct {
-	PRNumber int
+	PRID     int64
 	Analysis *agent.Analysis
 	Err      error
 }
 
 // PRApprovedMsg is sent when a PR has been approved
 type PRApprovedMsg struct {
-	PRNumber int
-	Err      error
+	PRID int64
+	Err  error
+}
+
+// AutoMergeEnabledMsg is sent when auto-merge has been enabled for a PR
+type AutoMergeEnabledMsg struct {
+	PRID int64
+	Err  error
 }
 
 // StatusMsg is a general status update message
@@ -85,7 +92,7 @@ func FetchPRsCmd(client *github.Client) tea.Cmd {
 }
 
 // FetchDiffStatsCmd fetches diff stats for a PR
-func FetchDiffStatsCmd(client *github.Client, pr *github.PullRequest) tea.Cmd {
+func FetchDiffStatsCmd(client *github.Client, pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Fetching diff stats", slog.Any("pr", pr))
 		start := time.Now()
@@ -102,15 +109,15 @@ func FetchDiffStatsCmd(client *github.Client, pr *github.PullRequest) tea.Cmd {
 		}
 		
 		return DiffStatsLoadedMsg{
-			PRNumber: pr.Number,
-			Stats:    stats,
-			Err:      err,
+			PRID:  prID,
+			Stats: stats,
+			Err:   err,
 		}
 	}
 }
 
 // FetchCheckStatusCmd fetches check status for a PR
-func FetchCheckStatusCmd(client *github.Client, pr *github.PullRequest) tea.Cmd {
+func FetchCheckStatusCmd(client *github.Client, pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Fetching check status", slog.Any("pr", pr))
 		start := time.Now()
@@ -127,15 +134,15 @@ func FetchCheckStatusCmd(client *github.Client, pr *github.PullRequest) tea.Cmd 
 		}
 		
 		return CheckStatusLoadedMsg{
-			PRNumber: pr.Number,
-			Status:   status,
-			Err:      err,
+			PRID:   prID,
+			Status: status,
+			Err:    err,
 		}
 	}
 }
 
 // FetchReviewsCmd fetches reviews for a PR
-func FetchReviewsCmd(client *github.Client, pr *github.PullRequest, username string) tea.Cmd {
+func FetchReviewsCmd(client *github.Client, pr *github.PullRequest, username string, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Fetching reviews", slog.Any("pr", pr), slog.String("username", username))
 		start := time.Now()
@@ -164,15 +171,15 @@ func FetchReviewsCmd(client *github.Client, pr *github.PullRequest, username str
 		}
 		
 		return ReviewsLoadedMsg{
-			PRNumber: pr.Number,
-			Reviews:  reviews,
-			Err:      err,
+			PRID:    prID,
+			Reviews: reviews,
+			Err:     err,
 		}
 	}
 }
 
 // ApprovePRCmd approves a PR
-func ApprovePRCmd(pr *github.PullRequest) tea.Cmd {
+func ApprovePRCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Info("Approving PR", slog.Any("pr", pr))
 		start := time.Now()
@@ -189,15 +196,49 @@ func ApprovePRCmd(pr *github.PullRequest) tea.Cmd {
 		}
 		
 		return PRApprovedMsg{
-			PRNumber: pr.Number,
-			Err:      err,
+			PRID: prID,
+			Err:  err,
+		}
+	}
+}
+
+// EnableAutoMergeCmd enables auto-merge for a PR
+func EnableAutoMergeCmd(pr *github.PullRequest, mergeMethod string, prID int64) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Enabling auto-merge for PR", slog.Any("pr", pr), slog.String("merge_method", mergeMethod))
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		err := pr.EnableAutoMerge(ctx, mergeMethod)
+		duration := time.Since(start)
+		
+		if err != nil {
+			slog.Error("Auto-merge enabling failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
+		} else {
+			slog.Info("Auto-merge enabled successfully", slog.Any("pr", pr), slog.Duration("duration", duration))
+		}
+		
+		return AutoMergeEnabledMsg{
+			PRID: prID,
+			Err:  err,
 		}
 	}
 }
 
 // FetchAIAnalysisCmd runs AI analysis for a PR
-func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats *github.DiffStats, checkStatus *github.CheckStatus, reviews []*github.Review) tea.Cmd {
+func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats *github.DiffStats, checkStatus *github.CheckStatus, reviews []*github.Review, prID int64) tea.Cmd {
 	return func() tea.Msg {
+		// Skip AI analysis if HeadSHA is not yet available
+		if pr.HeadSHA == "" {
+			slog.Debug("Skipping AI analysis - HeadSHA not available yet", slog.Any("pr", pr))
+			return AIAnalysisLoadedMsg{
+				PRID:     prID,
+				Analysis: nil,
+				Err:      fmt.Errorf("HeadSHA not available yet"),
+			}
+		}
+
 		slog.Debug("Starting AI analysis", slog.Any("pr", pr))
 		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -210,7 +251,7 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 				slog.Debug("AI analysis loaded from cache", slog.Any("pr", pr), slog.Duration("duration", duration), 
 					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 				return AIAnalysisLoadedMsg{
-					PRNumber: pr.Number,
+					PRID:     prID,
 					Analysis: analysis,
 					Err:      nil,
 				}
@@ -251,7 +292,7 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		}
 
 		return AIAnalysisLoadedMsg{
-			PRNumber: pr.Number,
+			PRID:     prID,
 			Analysis: analysis,
 			Err:      err,
 		}
@@ -259,7 +300,7 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 }
 
 // FetchCachedAIAnalysisCmd loads cached AI analysis for a PR
-func FetchCachedAIAnalysisCmd(pr *github.PullRequest) tea.Cmd {
+func FetchCachedAIAnalysisCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Loading cached AI analysis", slog.Any("pr", pr))
 		
@@ -269,7 +310,7 @@ func FetchCachedAIAnalysisCmd(pr *github.PullRequest) tea.Cmd {
 				slog.Debug("Cached AI analysis found", slog.Any("pr", pr), 
 					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 				return AIAnalysisLoadedMsg{
-					PRNumber: pr.Number,
+					PRID:     prID,
 					Analysis: analysis,
 					Err:      nil,
 				}
@@ -280,6 +321,25 @@ func FetchCachedAIAnalysisCmd(pr *github.PullRequest) tea.Cmd {
 		slog.Debug("No cached AI analysis found", slog.Any("pr", pr))
 		return nil
 	}
+}
+
+// TriggerAIAnalysisWhenReadyCmd triggers AI analysis when all prerequisites are met
+// This is used in sequential loading to ensure AI analysis happens after HeadSHA is available
+func TriggerAIAnalysisWhenReadyCmd(aiAgent *agent.Agent, pr *github.PullRequest, prID int64) tea.Cmd {
+	return func() tea.Msg {
+		slog.Debug("Checking if AI analysis can be triggered", slog.Any("pr", pr))
+		
+		// This command will be processed by the model's Update method
+		// which will check if all conditions are met and trigger the actual AI analysis
+		return TriggerAIAnalysisMsg{
+			PRID: prID,
+		}
+	}
+}
+
+// TriggerAIAnalysisMsg is sent when we want to trigger AI analysis for a PR
+type TriggerAIAnalysisMsg struct {
+	PRID int64
 }
 
 // SmartRefreshCmd fetches fresh PRs for smart refresh

@@ -52,7 +52,7 @@ func (pr *PullRequest) reviewsCacheKey() string {
 }
 
 func (pr *PullRequest) aiAnalysisCacheKey() string {
-	return fmt.Sprintf("ai:%s/%s#%d", pr.Owner, pr.Repo, pr.Number)
+	return fmt.Sprintf("ai:%s/%s#%d:%s", pr.Owner, pr.Repo, pr.Number, pr.HeadSHA)
 }
 
 // invalidateCache removes all cached data for this PR
@@ -75,9 +75,10 @@ func (pr *PullRequest) InvalidateCommitRelatedCache() {
 	}
 
 	// Delete commit-related cached data (but preserve reviews)
+	// Note: AI analysis cache is not deleted here since it uses HeadSHA in the key
+	// and will naturally miss when the commit changes
 	pr.client.cache.Delete(pr.diffStatsCacheKey())
 	pr.client.cache.Delete(pr.checkStatusCacheKey())
-	pr.client.cache.Delete(pr.aiAnalysisCacheKey())
 }
 
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR
@@ -92,6 +93,13 @@ func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
 		return nil, err
 	}
 
+	// Validate cached AI analysis - if it's nil, delete the bad cache entry
+	if cachedAnalysis == nil {
+		slog.Debug("Deleting invalid cached AI analysis (nil)", slog.Any("pr", pr))
+		pr.client.cache.Delete(cacheKey)
+		return nil, fmt.Errorf("cached AI analysis was invalid")
+	}
+
 	return cachedAnalysis, nil
 }
 
@@ -99,6 +107,12 @@ func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
 func (pr *PullRequest) SetCachedAIAnalysis(analysis interface{}) error {
 	if pr.client.cache == nil {
 		return fmt.Errorf("cache not available")
+	}
+
+	// Only cache valid AI analysis (not nil)
+	if analysis == nil {
+		slog.Debug("Skipping cache of invalid AI analysis (nil)", slog.Any("pr", pr))
+		return fmt.Errorf("cannot cache nil AI analysis")
 	}
 
 	cacheKey := pr.aiAnalysisCacheKey()
@@ -149,9 +163,17 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	if pr.client.cache != nil {
 		var cachedReviews []*Review
 		if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
-			duration := time.Since(start)
-			slog.Debug("Retrieved reviews from cache", slog.Any("pr", pr), slog.Int("count", len(cachedReviews)), slog.Duration("duration", duration))
-			return cachedReviews, nil
+			// Validate cached data - if it's nil, delete the bad cache entry and fetch fresh
+			if cachedReviews != nil {
+				duration := time.Since(start)
+				slog.Debug("Retrieved reviews from cache", slog.Any("pr", pr), slog.Int("count", len(cachedReviews)), slog.Duration("duration", duration))
+				return cachedReviews, nil
+			} else {
+				// Bad cached data (nil) - delete it and fetch fresh
+				slog.Debug("Deleting invalid cached reviews (nil)", slog.Any("pr", pr))
+				pr.client.cache.Delete(cacheKey)
+				// Fall through to fresh API call
+			}
 		}
 	}
 
@@ -171,7 +193,7 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 		return nil, fmt.Errorf("failed to get reviews: %w", err)
 	}
 
-	var result []*Review
+	result := make([]*Review, 0)
 	for _, review := range reviews {
 		result = append(result, &Review{
 			State: review.GetState(),
@@ -182,8 +204,8 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 
 	slog.Debug("GitHub API get reviews completed", slog.Any("pr", pr), slog.Int("count", len(result)), slog.Duration("duration", time.Since(start)))
 
-	// Cache the results
-	if pr.client.cache != nil {
+	// Cache the results - only cache valid reviews (not nil)
+	if pr.client.cache != nil && result != nil {
 		pr.client.cache.Set(cacheKey, result)
 	}
 
@@ -220,9 +242,37 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	if pr.client.cache != nil {
 		var cachedStatus *CheckStatus
 		if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
-			duration := time.Since(start)
-			slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
-			return cachedStatus, nil
+			// Validate cached data - if it's nil or has invalid state, delete and fetch fresh
+			if cachedStatus != nil && cachedStatus.State != "" && cachedStatus.Description != "" {
+				duration := time.Since(start)
+				slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
+				
+				// If HeadSHA is not populated, we still need to fetch PR details to get it
+				if pr.HeadSHA == "" {
+					slog.Debug("HeadSHA not available, fetching PR details", slog.Any("pr", pr))
+					var prDetails *github.PullRequest
+					operation := func() error {
+						var getErr error
+						prDetails, _, getErr = pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+						return getErr
+					}
+
+					exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
+					if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err == nil {
+						pr.HeadSHA = prDetails.GetHead().GetSHA()
+						slog.Debug("Retrieved PR details for HeadSHA", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA))
+					} else {
+						slog.Debug("Failed to get PR details for HeadSHA", slog.Any("pr", pr), slog.Any("error", err))
+					}
+				}
+				
+				return cachedStatus, nil
+			} else {
+				// Bad cached data (nil or invalid state/description) - delete it and fetch fresh
+				slog.Debug("Deleting invalid cached check status", slog.Any("pr", pr), slog.Any("status", cachedStatus))
+				pr.client.cache.Delete(cacheKey)
+				// Fall through to fresh API call
+			}
 		}
 	}
 
@@ -305,8 +355,8 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 
 	slog.Debug("GitHub API get check status completed", slog.Any("pr", pr), slog.Any("status", status), slog.Duration("duration", time.Since(start)))
 
-	// Cache the results
-	if pr.client.cache != nil {
+	// Cache the results - only cache valid status (not nil and has state/description)
+	if pr.client.cache != nil && status != nil && status.State != "" && status.Description != "" {
 		pr.client.cache.Set(cacheKey, status)
 	}
 
@@ -328,9 +378,17 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	if pr.client.cache != nil {
 		var cachedStats *DiffStats
 		if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
-			duration := time.Since(start)
-			slog.Debug("Retrieved diff stats from cache", slog.Any("pr", pr), slog.Any("stats", cachedStats), slog.Duration("duration", duration))
-			return cachedStats, nil
+			// Validate cached data - if it's nil or has invalid values, delete and fetch fresh
+			if cachedStats != nil && cachedStats.Additions >= 0 && cachedStats.Deletions >= 0 && cachedStats.Files >= 0 {
+				duration := time.Since(start)
+				slog.Debug("Retrieved diff stats from cache", slog.Any("pr", pr), slog.Any("stats", cachedStats), slog.Duration("duration", duration))
+				return cachedStats, nil
+			} else {
+				// Bad cached data (nil or invalid values) - delete it and fetch fresh
+				slog.Debug("Deleting invalid cached diff stats", slog.Any("pr", pr), slog.Any("stats", cachedStats))
+				pr.client.cache.Delete(cacheKey)
+				// Fall through to fresh API call
+			}
 		}
 	}
 
@@ -359,8 +417,8 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 
 	slog.Debug("GitHub API get diff stats completed", slog.Any("pr", pr), slog.Any("stats", stats), slog.Duration("duration", time.Since(start)))
 
-	// Cache the results
-	if pr.client.cache != nil {
+	// Cache the results - only cache valid stats (not nil and has non-negative values)
+	if pr.client.cache != nil && stats != nil && stats.Additions >= 0 && stats.Deletions >= 0 && stats.Files >= 0 {
 		pr.client.cache.Set(cacheKey, stats)
 	}
 
@@ -468,4 +526,11 @@ func formatCheckDescription(details []CheckDetail) string {
 
 	return fmt.Sprintf("%d checks: %d passing, %d failing, %d pending",
 		len(details), successCount, failureCount, pendingCount)
+}
+
+// EnableAutoMerge enables auto-merge for this pull request
+func (pr *PullRequest) EnableAutoMerge(ctx context.Context, mergeMethod string) error {
+	slog.Debug("Enabling auto-merge for PR", slog.Any("pr", pr), slog.String("merge_method", mergeMethod))
+	
+	return pr.client.EnableAutoMerge(ctx, pr.Owner, pr.Repo, pr.Number, mergeMethod)
 }
