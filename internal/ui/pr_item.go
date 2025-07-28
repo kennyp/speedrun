@@ -133,30 +133,6 @@ func (i PRItem) FilterValue() string {
 	return i.PR.Title
 }
 
-// Helper functions
-
-func joinWithCommas(items []string) string {
-	if len(items) == 0 {
-		return ""
-	}
-	if len(items) == 1 {
-		return items[0]
-	}
-	if len(items) == 2 {
-		return items[0] + " and " + items[1]
-	}
-	result := ""
-	for i, item := range items {
-		if i == len(items)-1 {
-			result += ", and " + item
-		} else if i > 0 {
-			result += ", " + item
-		} else {
-			result += item
-		}
-	}
-	return result
-}
 
 func getStatusEmoji(status string) string {
 	switch status {

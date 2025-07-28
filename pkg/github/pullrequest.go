@@ -62,10 +62,18 @@ func (pr *PullRequest) invalidateCache() {
 	}
 
 	// Delete all cached data for this PR
-	pr.client.cache.Delete(pr.diffStatsCacheKey())
-	pr.client.cache.Delete(pr.checkStatusCacheKey())
-	pr.client.cache.Delete(pr.reviewsCacheKey())
-	pr.client.cache.Delete(pr.aiAnalysisCacheKey())
+	if err := pr.client.cache.Delete(pr.diffStatsCacheKey()); err != nil {
+		slog.Debug("Failed to delete diff stats cache", slog.Any("error", err))
+	}
+	if err := pr.client.cache.Delete(pr.checkStatusCacheKey()); err != nil {
+		slog.Debug("Failed to delete check status cache", slog.Any("error", err))
+	}
+	if err := pr.client.cache.Delete(pr.reviewsCacheKey()); err != nil {
+		slog.Debug("Failed to delete reviews cache", slog.Any("error", err))
+	}
+	if err := pr.client.cache.Delete(pr.aiAnalysisCacheKey()); err != nil {
+		slog.Debug("Failed to delete AI analysis cache", slog.Any("error", err))
+	}
 }
 
 // InvalidateCommitRelatedCache removes cached data that changes when commits are updated
@@ -77,17 +85,21 @@ func (pr *PullRequest) InvalidateCommitRelatedCache() {
 	// Delete commit-related cached data (but preserve reviews)
 	// Note: AI analysis cache is not deleted here since it uses HeadSHA in the key
 	// and will naturally miss when the commit changes
-	pr.client.cache.Delete(pr.diffStatsCacheKey())
-	pr.client.cache.Delete(pr.checkStatusCacheKey())
+	if err := pr.client.cache.Delete(pr.diffStatsCacheKey()); err != nil {
+		slog.Debug("Failed to delete diff stats cache", slog.Any("error", err))
+	}
+	if err := pr.client.cache.Delete(pr.checkStatusCacheKey()); err != nil {
+		slog.Debug("Failed to delete check status cache", slog.Any("error", err))
+	}
 }
 
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR
-func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
+func (pr *PullRequest) GetCachedAIAnalysis() (any, error) {
 	if pr.client.cache == nil {
 		return nil, fmt.Errorf("cache not available")
 	}
 
-	var cachedAnalysis interface{}
+	var cachedAnalysis any
 	cacheKey := pr.aiAnalysisCacheKey()
 	if err := pr.client.cache.Get(cacheKey, &cachedAnalysis); err != nil {
 		return nil, err
@@ -96,7 +108,9 @@ func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
 	// Validate cached AI analysis - if it's nil, delete the bad cache entry
 	if cachedAnalysis == nil {
 		slog.Debug("Deleting invalid cached AI analysis (nil)", slog.Any("pr", pr))
-		pr.client.cache.Delete(cacheKey)
+		if err := pr.client.cache.Delete(cacheKey); err != nil {
+			slog.Debug("Failed to delete invalid AI analysis cache", slog.Any("error", err))
+		}
 		return nil, fmt.Errorf("cached AI analysis was invalid")
 	}
 
@@ -104,7 +118,7 @@ func (pr *PullRequest) GetCachedAIAnalysis() (interface{}, error) {
 }
 
 // SetCachedAIAnalysis stores AI analysis in cache for this PR
-func (pr *PullRequest) SetCachedAIAnalysis(analysis interface{}) error {
+func (pr *PullRequest) SetCachedAIAnalysis(analysis any) error {
 	if pr.client.cache == nil {
 		return fmt.Errorf("cache not available")
 	}
@@ -171,7 +185,9 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 			} else {
 				// Bad cached data (nil) - delete it and fetch fresh
 				slog.Debug("Deleting invalid cached reviews (nil)", slog.Any("pr", pr))
-				pr.client.cache.Delete(cacheKey)
+				if err := pr.client.cache.Delete(cacheKey); err != nil {
+					slog.Debug("Failed to delete invalid reviews cache", slog.Any("error", err))
+				}
 				// Fall through to fresh API call
 			}
 		}
@@ -206,7 +222,9 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 
 	// Cache the results - only cache valid reviews (not nil)
 	if pr.client.cache != nil && result != nil {
-		pr.client.cache.Set(cacheKey, result)
+		if err := pr.client.cache.Set(cacheKey, result); err != nil {
+			slog.Debug("Failed to cache reviews", slog.Any("error", err))
+		}
 	}
 
 	return result, nil
@@ -270,7 +288,9 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 			} else {
 				// Bad cached data (nil or invalid state/description) - delete it and fetch fresh
 				slog.Debug("Deleting invalid cached check status", slog.Any("pr", pr), slog.Any("status", cachedStatus))
-				pr.client.cache.Delete(cacheKey)
+				if err := pr.client.cache.Delete(cacheKey); err != nil {
+					slog.Debug("Failed to delete invalid check status cache", slog.Any("error", err))
+				}
 				// Fall through to fresh API call
 			}
 		}
@@ -305,7 +325,9 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 		checkRuns, _, checkErr = pr.client.client.Checks.ListCheckRunsForRef(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
 		return checkErr
 	}
-	backoff.Retry(checkOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx))
+	if err := backoff.Retry(checkOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx)); err != nil {
+		slog.Debug("Failed to get check runs after retries", slog.Any("error", err))
+	}
 
 	// Get statuses with retry
 	statusOperation := func() error {
@@ -313,7 +335,9 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 		statuses, _, statusErr = pr.client.client.Repositories.GetCombinedStatus(ctx, pr.Owner, pr.Repo, pr.HeadSHA, nil)
 		return statusErr
 	}
-	backoff.Retry(statusOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx))
+	if err := backoff.Retry(statusOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx)); err != nil {
+		slog.Debug("Failed to get combined status after retries", slog.Any("error", err))
+	}
 
 	status := &CheckStatus{
 		Details: make([]CheckDetail, 0),
@@ -357,7 +381,9 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 
 	// Cache the results - only cache valid status (not nil and has state/description)
 	if pr.client.cache != nil && status != nil && status.State != "" && status.Description != "" {
-		pr.client.cache.Set(cacheKey, status)
+		if err := pr.client.cache.Set(cacheKey, status); err != nil {
+			slog.Debug("Failed to cache check status", slog.Any("error", err))
+		}
 	}
 
 	return status, nil
@@ -386,7 +412,9 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 			} else {
 				// Bad cached data (nil or invalid values) - delete it and fetch fresh
 				slog.Debug("Deleting invalid cached diff stats", slog.Any("pr", pr), slog.Any("stats", cachedStats))
-				pr.client.cache.Delete(cacheKey)
+				if err := pr.client.cache.Delete(cacheKey); err != nil {
+					slog.Debug("Failed to delete invalid diff stats cache", slog.Any("error", err))
+				}
 				// Fall through to fresh API call
 			}
 		}
@@ -419,7 +447,9 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 
 	// Cache the results - only cache valid stats (not nil and has non-negative values)
 	if pr.client.cache != nil && stats != nil && stats.Additions >= 0 && stats.Deletions >= 0 && stats.Files >= 0 {
-		pr.client.cache.Set(cacheKey, stats)
+		if err := pr.client.cache.Set(cacheKey, stats); err != nil {
+			slog.Debug("Failed to cache diff stats", slog.Any("error", err))
+		}
 	}
 
 	return stats, nil
@@ -431,8 +461,8 @@ func (pr *PullRequest) Approve(ctx context.Context) error {
 	start := time.Now()
 
 	review := &github.PullRequestReviewRequest{
-		Event: github.String("APPROVE"),
-		Body:  github.String("LGTM"),
+		Event: github.Ptr("APPROVE"),
+		Body:  github.Ptr("LGTM"),
 	}
 
 	_, _, err := pr.client.client.PullRequests.CreateReview(ctx, pr.Owner, pr.Repo, pr.Number, review)

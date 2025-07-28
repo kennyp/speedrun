@@ -503,9 +503,10 @@ func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 		for _, review := range msg.Reviews {
 			if review.User == m.username {
 				userReviewed = true
-				if review.State == "APPROVED" {
+				switch review.State {
+				case "APPROVED":
 					userApproved = true
-				} else if review.State == "DISMISSED" {
+				case "DISMISSED":
 					userDismissed = true
 				}
 				// Note: We don't break here because there might be multiple reviews
@@ -698,7 +699,7 @@ func (m Model) handlePRApproved(msg PRApprovedMsg) (Model, tea.Cmd) {
 	m = m.updateVisibleItems()
 
 	// Check if auto-merge should be triggered after approval
-	var nextCmd tea.Cmd = m.moveToNext()
+	nextCmd := m.moveToNext()
 	if m.config.GitHub.AutoMergeOnApproval == "true" && approvedPR != nil {
 		slog.Info("Auto-triggering auto-merge after approval", slog.Any("pr", approvedPR.PR))
 		nextCmd = tea.Batch(m.moveToNext(), EnableAutoMergeCmd(approvedPR.PR, "SQUASH", approvedPR.ID))
@@ -1082,7 +1083,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 	// Check Status
 	if item.CheckStatus != nil {
 		content.WriteString("## ✅ Checks\n\n")
-		content.WriteString(fmt.Sprintf("**Status:** %s\n", strings.Title(item.CheckStatus.State)))
+		content.WriteString(fmt.Sprintf("**Status:** %s\n", strings.ToUpper(string(item.CheckStatus.State[0]))+item.CheckStatus.State[1:]))
 		if item.CheckStatus.Description != "" {
 			content.WriteString(fmt.Sprintf("**Description:** %s\n", item.CheckStatus.Description))
 		}
@@ -1137,7 +1138,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 				}
 			}
 
-			content.WriteString(fmt.Sprintf("\n**Your Status:** "))
+			content.WriteString("\n**Your Status:** ")
 			if userApproved {
 				content.WriteString("✅ Approved")
 			} else if userReviewed {
@@ -1241,11 +1242,11 @@ func (m Model) formatPopupContent(content string, maxWidth int) string {
 
 	for _, line := range lines {
 		// Handle headers
-		if strings.HasPrefix(line, "# ") {
-			text := strings.TrimPrefix(line, "# ")
+		if after, ok := strings.CutPrefix(line, "# "); ok {
+			text := after
 			formatted.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("205")).Render(text))
-		} else if strings.HasPrefix(line, "## ") {
-			text := strings.TrimPrefix(line, "## ")
+		} else if after, ok := strings.CutPrefix(line, "## "); ok {
+			text := after
 			formatted.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("75")).Render(text))
 		} else if strings.HasPrefix(line, "**") && strings.HasSuffix(line, "**") {
 			text := strings.TrimSuffix(strings.TrimPrefix(line, "**"), "**")

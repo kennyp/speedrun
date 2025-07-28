@@ -36,7 +36,7 @@ type GraphQLResponse struct {
 type GraphQLError struct {
 	Message   string                 `json:"message"`
 	Locations []GraphQLErrorLocation `json:"locations,omitempty"`
-	Path      []interface{}          `json:"path,omitempty"`
+	Path      []any                  `json:"path,omitempty"`
 }
 
 // GraphQLErrorLocation represents the location of a GraphQL error
@@ -93,7 +93,7 @@ func (c *GraphQLClient) EnableAutoMerge(ctx context.Context, pullRequestID strin
 		}
 	`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"input": AutoMergeInput{
 			PullRequestID: pullRequestID,
 			MergeMethod:   mergeMethod,
@@ -129,7 +129,7 @@ func (c *GraphQLClient) GetPullRequestNodeID(ctx context.Context, owner, repo st
 		}
 	`
 
-	variables := map[string]interface{}{
+	variables := map[string]any{
 		"owner":  owner,
 		"repo":   repo,
 		"number": number,
@@ -202,8 +202,8 @@ func formatGraphQLError(message string) string {
 }
 
 // executeQuery executes a GraphQL query/mutation
-func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]interface{}) (*GraphQLResponse, error) {
-	payload := map[string]interface{}{
+func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variables map[string]any) (*GraphQLResponse, error) {
+	payload := map[string]any{
 		"query":     query,
 		"variables": variables,
 	}
@@ -228,7 +228,11 @@ func (c *GraphQLClient) executeQuery(ctx context.Context, query string, variable
 	if err != nil {
 		return nil, fmt.Errorf("failed to execute GraphQL request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			slog.Debug("Failed to close response body", slog.Any("error", err))
+		}
+	}()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {

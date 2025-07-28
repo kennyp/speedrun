@@ -22,7 +22,7 @@ alias t := test
 
 golangci-lint := "go tool golangci-lint"
 staticcheck := "go tool staticcheck"
-modernize := "go tool modernize"
+modernize := "go tool golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize"
 
 # Show this
 @help: (banner "Recipes") && (banner "")
@@ -53,7 +53,7 @@ test: test-static test-lint test-unit
 # Run lint checks `package:"packages to test, empty for all"`
 [group("test")]
 @test-lint +package="./...":
-    just step_prefix="Linting Go Code" step {{ golangci-lint }} run $(go list {{ package }} | grep -v '/reference/')
+    just step_prefix="Linting Go Code" step {{ golangci-lint }} run ./cmd/... ./internal/... ./pkg/...
     just step_prefix="Checking Modernize" step go run {{ modernize }} -test -fix $(go list {{ package }} | grep -v '/reference/')
 
 # Run unit tests

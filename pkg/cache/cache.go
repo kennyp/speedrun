@@ -50,7 +50,7 @@ func New(dbPath string, maxAge time.Duration) (*Cache, error) {
 	}
 
 	if err := cache.initialize(); err != nil {
-		db.Close()
+		_ = db.Close() // Ignore close error since we're already in error state
 		return nil, fmt.Errorf("failed to initialize cache: %w", err)
 	}
 
@@ -78,7 +78,7 @@ func (c *Cache) initialize() error {
 }
 
 // Get retrieves a cached value by key
-func (c *Cache) Get(key string, dest interface{}) error {
+func (c *Cache) Get(key string, dest any) error {
 	start := time.Now()
 	query := `
 		SELECT data, expires_at 
@@ -111,7 +111,7 @@ func (c *Cache) Get(key string, dest interface{}) error {
 }
 
 // Set stores a value in the cache with the configured TTL
-func (c *Cache) Set(key string, value interface{}) error {
+func (c *Cache) Set(key string, value any) error {
 	start := time.Now()
 	data, err := json.Marshal(value)
 	if err != nil {

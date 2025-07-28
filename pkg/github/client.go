@@ -15,8 +15,8 @@ import (
 
 // Cache interface for GitHub data caching
 type Cache interface {
-	Get(key string, dest interface{}) error
-	Set(key string, value interface{}) error
+	Get(key string, dest any) error
+	Set(key string, value any) error
 	Delete(key string) error
 }
 
@@ -167,7 +167,9 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 
 	// Cache the results
 	if c.cache != nil {
-		c.cache.Set(cacheKey, prs)
+		if err := c.cache.Set(cacheKey, prs); err != nil {
+			slog.Debug("Failed to cache search results", slog.String("query", c.searchQuery), slog.Any("error", err))
+		}
 	}
 
 	return prs, nil
@@ -230,7 +232,9 @@ func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, e
 	// Update the cache with fresh results
 	if c.cache != nil {
 		cacheKey := c.searchCacheKey()
-		c.cache.Set(cacheKey, prs)
+		if err := c.cache.Set(cacheKey, prs); err != nil {
+			slog.Debug("Failed to cache fresh search results", slog.String("query", c.searchQuery), slog.Any("error", err))
+		}
 	}
 
 	return prs, nil

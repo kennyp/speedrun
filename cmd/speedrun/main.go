@@ -321,7 +321,11 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		slog.Error("Failed to initialize cache", "error", err)
 		return fmt.Errorf("failed to initialize cache: %w", err)
 	}
-	defer cacheInstance.Close()
+	defer func() {
+		if err := cacheInstance.Close(); err != nil {
+			slog.Error("Failed to close cache", slog.Any("error", err))
+		}
+	}()
 
 	// Cleanup expired cache entries on startup
 	slog.Debug("Cleaning up expired cache entries...")

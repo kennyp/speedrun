@@ -318,7 +318,9 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 			slog.Debug("AI analysis completed", slog.Any("pr", pr), slog.Duration("duration", duration),
 				slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 			// Cache the analysis result
-			pr.SetCachedAIAnalysis(analysis)
+			if err := pr.SetCachedAIAnalysis(analysis); err != nil {
+				slog.Debug("Failed to cache AI analysis", slog.Any("pr", pr), slog.Any("error", err))
+			}
 		}
 
 		return AIAnalysisLoadedMsg{

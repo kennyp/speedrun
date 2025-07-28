@@ -137,8 +137,8 @@ func (a *Agent) parseResponse(content string) *Analysis {
 
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "RECOMMENDATION:") {
-			rec := strings.TrimSpace(strings.TrimPrefix(line, "RECOMMENDATION:"))
+		if after, ok := strings.CutPrefix(line, "RECOMMENDATION:"); ok {
+			rec := strings.TrimSpace(after)
 			switch rec {
 			case "APPROVE":
 				analysis.Recommendation = Approve
@@ -147,10 +147,10 @@ func (a *Agent) parseResponse(content string) *Analysis {
 			case "DEEP_REVIEW":
 				analysis.Recommendation = DeepReview
 			}
-		} else if strings.HasPrefix(line, "RISK_LEVEL:") {
-			analysis.RiskLevel = strings.TrimSpace(strings.TrimPrefix(line, "RISK_LEVEL:"))
-		} else if strings.HasPrefix(line, "REASONING:") {
-			analysis.Reasoning = strings.TrimSpace(strings.TrimPrefix(line, "REASONING:"))
+		} else if after, ok := strings.CutPrefix(line, "RISK_LEVEL:"); ok {
+			analysis.RiskLevel = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "REASONING:"); ok {
+			analysis.Reasoning = strings.TrimSpace(after)
 		}
 	}
 
