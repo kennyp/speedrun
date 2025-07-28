@@ -188,6 +188,182 @@ func main() {
 				),
 			},
 
+			// Global backoff settings
+			&cli.DurationFlag{
+				Name:     "backoff-max-elapsed",
+				Usage:    "Global maximum elapsed time for backoff retry (e.g., 30s, 1m)",
+				Category: "Backoff",
+				Value:    30 * time.Second,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_BACKOFF_MAX_ELAPSED"),
+					config.OpTOMLValueSource("backoff.max_elapsed_time", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "backoff-initial-interval",
+				Usage:    "Global initial backoff interval (e.g., 1s, 500ms)",
+				Category: "Backoff",
+				Value:    1 * time.Second,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_BACKOFF_INITIAL_INTERVAL"),
+					config.OpTOMLValueSource("backoff.initial_interval", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "backoff-max-interval",
+				Usage:    "Global maximum backoff interval (e.g., 10s, 30s)",
+				Category: "Backoff",
+				Value:    10 * time.Second,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_BACKOFF_MAX_INTERVAL"),
+					config.OpTOMLValueSource("backoff.max_interval", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "backoff-multiplier",
+				Usage:    "Global backoff multiplier for exponential backoff",
+				Category: "Backoff",
+				Value:    2.0,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_BACKOFF_MULTIPLIER"),
+					config.OpTOMLValueSource("backoff.multiplier", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "backoff-randomization-factor",
+				Usage:    "Global randomization factor for backoff jitter (0.0-1.0)",
+				Category: "Backoff",
+				Value:    0.1,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_BACKOFF_RANDOMIZATION_FACTOR"),
+					config.OpTOMLValueSource("backoff.randomization_factor", configFile),
+				),
+			},
+
+			// GitHub-specific backoff overrides
+			&cli.DurationFlag{
+				Name:     "github-backoff-max-elapsed",
+				Usage:    "GitHub-specific maximum elapsed time for backoff retry (overrides global)",
+				Category: "GitHub Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_BACKOFF_MAX_ELAPSED"),
+					config.OpTOMLValueSource("github.backoff.max_elapsed_time", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "github-backoff-initial-interval",
+				Usage:    "GitHub-specific initial backoff interval (overrides global)",
+				Category: "GitHub Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_BACKOFF_INITIAL_INTERVAL"),
+					config.OpTOMLValueSource("github.backoff.initial_interval", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "github-backoff-max-interval",
+				Usage:    "GitHub-specific maximum backoff interval (overrides global)",
+				Category: "GitHub Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_BACKOFF_MAX_INTERVAL"),
+					config.OpTOMLValueSource("github.backoff.max_interval", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "github-backoff-multiplier",
+				Usage:    "GitHub-specific backoff multiplier (overrides global)",
+				Category: "GitHub Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_BACKOFF_MULTIPLIER"),
+					config.OpTOMLValueSource("github.backoff.multiplier", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "github-backoff-randomization-factor",
+				Usage:    "GitHub-specific randomization factor (overrides global)",
+				Category: "GitHub Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_BACKOFF_RANDOMIZATION_FACTOR"),
+					config.OpTOMLValueSource("github.backoff.randomization_factor", configFile),
+				),
+			},
+
+			// AI-specific backoff overrides
+			&cli.DurationFlag{
+				Name:     "ai-backoff-max-elapsed",
+				Usage:    "AI-specific maximum elapsed time for backoff retry (overrides global)",
+				Category: "AI Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_BACKOFF_MAX_ELAPSED"),
+					config.OpTOMLValueSource("ai.backoff.max_elapsed_time", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "ai-backoff-initial-interval",
+				Usage:    "AI-specific initial backoff interval (overrides global)",
+				Category: "AI Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_BACKOFF_INITIAL_INTERVAL"),
+					config.OpTOMLValueSource("ai.backoff.initial_interval", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "ai-backoff-max-interval",
+				Usage:    "AI-specific maximum backoff interval (overrides global)",
+				Category: "AI Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_BACKOFF_MAX_INTERVAL"),
+					config.OpTOMLValueSource("ai.backoff.max_interval", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "ai-backoff-multiplier",
+				Usage:    "AI-specific backoff multiplier (overrides global)",
+				Category: "AI Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_BACKOFF_MULTIPLIER"),
+					config.OpTOMLValueSource("ai.backoff.multiplier", configFile),
+				),
+			},
+			&cli.Float64Flag{
+				Name:     "ai-backoff-randomization-factor",
+				Usage:    "AI-specific randomization factor (overrides global)",
+				Category: "AI Backoff",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_BACKOFF_RANDOMIZATION_FACTOR"),
+					config.OpTOMLValueSource("ai.backoff.randomization_factor", configFile),
+				),
+			},
+
+			// Client timeout settings
+			&cli.DurationFlag{
+				Name:     "client-timeout",
+				Usage:    "Global client timeout for HTTP requests (e.g., 30s, 1m)",
+				Category: "Client Timeouts",
+				Value:    30 * time.Second,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_CLIENT_TIMEOUT"),
+					config.OpTOMLValueSource("client.timeout", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "github-client-timeout",
+				Usage:    "GitHub-specific client timeout (overrides global)",
+				Category: "Client Timeouts",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_GITHUB_CLIENT_TIMEOUT"),
+					config.OpTOMLValueSource("github.client.timeout", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "ai-client-timeout",
+				Usage:    "AI-specific client timeout (overrides global)",
+				Category: "Client Timeouts",
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_CLIENT_TIMEOUT"),
+					config.OpTOMLValueSource("ai.client.timeout", configFile),
+				),
+			},
+
 			// Auto-merge settings
 			&cli.StringFlag{
 				Name:     "auto-merge-on-approval",
@@ -340,7 +516,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		Ignored:  cfg.Checks.Ignored,
 		Required: cfg.Checks.Required,
 	}
-	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery, cacheInstance, cfg.Backoff.GitHub, githubChecksConfig)
+	githubClient, err := github.NewClient(ctx, cfg.GitHub.Token, cfg.GitHub.SearchQuery, cacheInstance, cfg.GitHub.Backoff, githubChecksConfig)
 	if err != nil {
 		slog.Error("Failed to create GitHub client", "error", err)
 		return fmt.Errorf("failed to create GitHub client: %w", err)
@@ -362,7 +538,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	var aiAgent *agent.Agent
 	if cfg.AI.Enabled {
 		slog.Debug("Creating AI agent", "model", cfg.AI.Model, "base_url", cfg.AI.BaseURL)
-		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.Backoff.OpenAI)
+		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
 		slog.Info("AI agent initialized", "model", cfg.AI.Model)
 	} else {

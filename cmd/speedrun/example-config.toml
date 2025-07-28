@@ -42,3 +42,50 @@ level = "info"
 #   - "-" or "stderr": writes to stderr
 #   - Custom path: writes to specified file
 # path = "/custom/log/speedrun/speedrun.log"
+
+# Global backoff defaults (inherited by all services)
+[backoff]
+# Maximum elapsed time for backoff retry (e.g., 30s, 1m, 2m)
+max_elapsed_time = "30s"
+# Initial backoff interval (e.g., 1s, 500ms)
+initial_interval = "1s"
+# Maximum backoff interval (e.g., 10s, 30s)
+max_interval = "10s"
+# Backoff multiplier for exponential backoff (typically 2.0)
+multiplier = 2.0
+# Randomization factor for backoff jitter (0.0-1.0, typically 0.1)
+randomization_factor = 0.1
+
+# GitHub-specific backoff overrides (optional)
+# Only specify values you want to override from global defaults
+[github.backoff]
+# GitHub APIs can be more restrictive, so use longer timeouts
+max_elapsed_time = "60s"
+max_interval = "15s"
+randomization_factor = 0.2
+# initial_interval and multiplier inherit from global defaults
+
+# AI-specific backoff overrides (optional)  
+# Only specify values you want to override from global defaults
+[ai.backoff]
+# AI APIs may need longer timeouts due to processing time
+max_elapsed_time = "90s"
+initial_interval = "2s"
+max_interval = "30s"
+randomization_factor = 0.3
+# multiplier inherits from global default (2.0)
+
+# Global client timeout configuration
+[client]
+# Global HTTP client timeout for all requests (e.g., 30s, 1m)
+timeout = "30s"
+
+# GitHub-specific client timeout (optional)
+# Overrides global client timeout for GitHub API calls
+[github.client]
+timeout = "60s"
+
+# AI-specific client timeout (optional)
+# Overrides global client timeout for AI API calls
+[ai.client]
+timeout = "90s"
