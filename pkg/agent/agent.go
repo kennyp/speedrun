@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"text/template"
+	"time"
 
 	_ "embed"
 
@@ -15,6 +16,7 @@ import (
 	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
+	"github.com/openai/openai-go/packages/param"
 )
 
 //go:embed prompts/developer.md
@@ -45,10 +47,11 @@ type Agent struct {
 	model         string
 	backoffConfig backoffconfig.Config
 	toolRegistry  *ToolRegistry
+	toolTimeout   time.Duration
 }
 
 // NewAgent creates a new AI agent
-func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config, toolRegistry *ToolRegistry) *Agent {
+func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config, toolRegistry *ToolRegistry, toolTimeout time.Duration) *Agent {
 	var opts []option.RequestOption
 
 	if baseURL != "" {
@@ -62,6 +65,7 @@ func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config,
 		model:         model,
 		backoffConfig: backoffConfig,
 		toolRegistry:  toolRegistry,
+		toolTimeout:   toolTimeout,
 	}
 }
 
@@ -126,12 +130,30 @@ func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatC
 
 		choice := response.Choices[0]
 		
-		// Add assistant's message to conversation
-		messages = append(messages, openai.AssistantMessage(choice.Message.Content))
-		
 		// Check if the assistant wants to use tools
 		if choice.Message.ToolCalls != nil && len(choice.Message.ToolCalls) > 0 {
 			slog.Debug("Processing tool calls", slog.Int("count", len(choice.Message.ToolCalls)))
+			
+			// Create assistant message with tool calls
+			var assistant openai.ChatCompletionAssistantMessageParam
+			if choice.Message.Content != "" {
+				assistant.Content.OfString = param.NewOpt(choice.Message.Content)
+			}
+			
+			// Convert tool calls to the parameter format
+			assistant.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(choice.Message.ToolCalls))
+			for i, toolCall := range choice.Message.ToolCalls {
+				assistant.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
+					ID:   toolCall.ID,
+					Type: "function",
+					Function: openai.ChatCompletionMessageToolCallFunctionParam{
+						Name:      toolCall.Function.Name,
+						Arguments: toolCall.Function.Arguments,
+					},
+				}
+			}
+			
+			messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant})
 			
 			// Execute tool calls
 			for _, toolCall := range choice.Message.ToolCalls {
@@ -142,14 +164,15 @@ func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatC
 				}
 				
 				// Add tool result to conversation
-				messages = append(messages, openai.ToolMessage(toolCall.ID, result))
+				messages = append(messages, openai.ToolMessage(result, toolCall.ID))
 			}
 			
 			// Continue the conversation to get the final response
 			continue
 		}
 		
-		// No tool calls, return the final response
+		// No tool calls, add regular assistant message and return
+		messages = append(messages, openai.AssistantMessage(choice.Message.Content))
 		return choice.Message.Content, nil
 	}
 	
@@ -175,8 +198,13 @@ func (a *Agent) executeToolCall(ctx context.Context, toolCall openai.ChatComplet
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
 	
-	// Execute the tool
-	return tool.Execute(ctx, args)
+	// Create a new context with a configurable timeout for tool execution
+	// This should be longer than the GitHub backoff MaxElapsedTime (60s) to allow retries
+	toolCtx, cancel := context.WithTimeout(context.Background(), a.toolTimeout)
+	defer cancel()
+	
+	// Execute the tool with the dedicated context
+	return tool.Execute(toolCtx, args)
 }
 
 // PRData represents the data about a PR for analysis

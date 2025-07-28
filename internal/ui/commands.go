@@ -257,7 +257,7 @@ func MergeCmd(pr *github.PullRequest, mergeMethod string, prID int64) tea.Cmd {
 }
 
 // FetchAIAnalysisCmd runs AI analysis for a PR
-func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats *github.DiffStats, checkStatus *github.CheckStatus, reviews []*github.Review, prID int64) tea.Cmd {
+func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats *github.DiffStats, checkStatus *github.CheckStatus, reviews []*github.Review, prID int64, analysisTimeout time.Duration) tea.Cmd {
 	return func() tea.Msg {
 		// Skip AI analysis if HeadSHA is not yet available
 		if pr.HeadSHA == "" {
@@ -271,7 +271,7 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 
 		slog.Debug("Starting AI analysis", slog.Any("pr", pr))
 		start := time.Now()
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), analysisTimeout)
 		defer cancel()
 
 		// Check for cached AI analysis first

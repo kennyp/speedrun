@@ -21,6 +21,10 @@ enabled = false
 # API key
 # api_key = "sk-..." or "op://vault/OpenAI/api-key"
 model = "gpt-4"
+# Timeout for entire AI analysis conversation (includes tool calls)
+analysis_timeout = "2m"
+# Timeout for individual AI tool executions
+tool_timeout = "90s"
 
 [checks]
 # CI checks to ignore when determining status

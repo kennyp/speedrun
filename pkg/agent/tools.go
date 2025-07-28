@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/kennyp/speedrun/pkg/github"
+	"github.com/kennyp/speedrun/pkg/github" 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/packages/param"
 )
@@ -140,20 +140,19 @@ func (t *GitHubTool) Execute(ctx context.Context, params json.RawMessage) (strin
 
 	switch p.Action {
 	case "get_pr_details":
-		// TODO: Implement PR details fetching
-		return fmt.Sprintf("PR #%d details for %s/%s", p.PRNumber, p.Owner, p.Repo), nil
+		return t.client.GetPRDetails(ctx, p.Owner, p.Repo, p.PRNumber)
 		
 	case "get_pr_diff":
-		// TODO: Implement diff fetching
-		return fmt.Sprintf("Diff for PR #%d in %s/%s", p.PRNumber, p.Owner, p.Repo), nil
+		return t.client.GetPRDiff(ctx, p.Owner, p.Repo, p.PRNumber)
 		
 	case "get_file_content":
-		// TODO: Implement file content fetching
-		return fmt.Sprintf("Content of %s at %s in %s/%s", p.Path, p.Ref, p.Owner, p.Repo), nil
+		if p.Path == "" {
+			return "", fmt.Errorf("path parameter is required for get_file_content")
+		}
+		return t.client.GetFileContent(ctx, p.Owner, p.Repo, p.Path, p.Ref)
 		
 	case "get_pr_comments":
-		// TODO: Implement PR comments fetching
-		return fmt.Sprintf("Comments for PR #%d in %s/%s", p.PRNumber, p.Owner, p.Repo), nil
+		return t.client.GetPRComments(ctx, p.Owner, p.Repo, p.PRNumber)
 		
 	default:
 		return "", fmt.Errorf("unknown action: %s", p.Action)

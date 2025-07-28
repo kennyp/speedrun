@@ -123,6 +123,26 @@ func main() {
 					config.OpTOMLValueSource("ai.model", configFile),
 				),
 			},
+			&cli.DurationFlag{
+				Name:     "ai-analysis-timeout",
+				Usage:    "Timeout for entire AI analysis conversation",
+				Category: "AI",
+				Value:    2 * time.Minute,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_ANALYSIS_TIMEOUT"),
+					config.OpTOMLValueSource("ai.analysis_timeout", configFile),
+				),
+			},
+			&cli.DurationFlag{
+				Name:     "ai-tool-timeout",
+				Usage:    "Timeout for individual AI tool executions",
+				Category: "AI",
+				Value:    90 * time.Second,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_AI_TOOL_TIMEOUT"),
+					config.OpTOMLValueSource("ai.tool_timeout", configFile),
+				),
+			},
 
 			// Check filtering
 			&cli.StringSliceFlag{
@@ -566,7 +586,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		// Create tool registry for agent
 		toolRegistry := agent.NewToolRegistry(githubClient)
 		
-		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff, toolRegistry)
+		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff, toolRegistry, cfg.AI.ToolTimeout)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
 		slog.Info("AI agent initialized", "model", cfg.AI.Model)
 	} else {

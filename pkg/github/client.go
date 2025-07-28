@@ -336,3 +336,118 @@ func (c *Client) Merge(ctx context.Context, owner, repo string, number int, merg
 	slog.Info("PR merged successfully", "owner", owner, "repo", repo, "number", number, "merge_method", mergeMethod, "sha", result.GetSHA())
 	return nil
 }
+
+// GetPRDetails gets detailed information about a pull request
+func (c *Client) GetPRDetails(ctx context.Context, owner, repo string, number int) (string, error) {
+	var pr *github.PullRequest
+	operation := func() error {
+		var err error
+		pr, _, err = c.client.PullRequests.Get(ctx, owner, repo, number)
+		return err
+	}
+
+	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+		return "", fmt.Errorf("failed to get PR details: %w", err)
+	}
+
+	// Return formatted PR details
+	details := fmt.Sprintf("PR #%d: %s\n", pr.GetNumber(), pr.GetTitle())
+	details += fmt.Sprintf("State: %s\n", pr.GetState())
+	details += fmt.Sprintf("Author: %s\n", pr.GetUser().GetLogin())
+	details += fmt.Sprintf("Additions: %d, Deletions: %d, Changed Files: %d\n", 
+		pr.GetAdditions(), pr.GetDeletions(), pr.GetChangedFiles())
+	details += fmt.Sprintf("Mergeable: %v\n", pr.GetMergeable())
+	if pr.GetBody() != "" {
+		details += fmt.Sprintf("Description: %s\n", pr.GetBody())
+	}
+	return details, nil
+}
+
+// GetPRDiff gets the diff for a pull request
+func (c *Client) GetPRDiff(ctx context.Context, owner, repo string, number int) (string, error) {
+	var diff string
+	operation := func() error {
+		var err error
+		diff, _, err = c.client.PullRequests.GetRaw(ctx, owner, repo, number, github.RawOptions{
+			Type: github.Diff,
+		})
+		return err
+	}
+
+	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+		return "", fmt.Errorf("failed to get PR diff: %w", err)
+	}
+
+	// Truncate very large diffs to avoid overwhelming the model
+	if len(diff) > 8000 {
+		diff = diff[:8000] + "\n... (diff truncated due to size)"
+	}
+	return diff, nil
+}
+
+// GetFileContent gets the content of a file from a repository
+func (c *Client) GetFileContent(ctx context.Context, owner, repo, path, ref string) (string, error) {
+	if ref == "" {
+		ref = "HEAD" // Default to HEAD if no ref specified
+	}
+
+	var content *github.RepositoryContent
+	operation := func() error {
+		var err error
+		content, _, _, err = c.client.Repositories.GetContents(ctx, owner, repo, path, &github.RepositoryContentGetOptions{
+			Ref: ref,
+		})
+		return err
+	}
+
+	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+		return "", fmt.Errorf("failed to get file content: %w", err)
+	}
+
+	fileContent, err := content.GetContent()
+	if err != nil {
+		return "", fmt.Errorf("failed to decode file content: %w", err)
+	}
+
+	// Truncate very large files
+	if len(fileContent) > 5000 {
+		fileContent = fileContent[:5000] + "\n... (file truncated due to size)"
+	}
+	return fileContent, nil
+}
+
+// GetPRComments gets comments for a pull request
+func (c *Client) GetPRComments(ctx context.Context, owner, repo string, number int) (string, error) {
+	var comments []*github.PullRequestComment
+	operation := func() error {
+		var err error
+		comments, _, err = c.client.PullRequests.ListComments(ctx, owner, repo, number, nil)
+		return err
+	}
+
+	exponentialBackoff := c.backoffConfig.ToExponentialBackoff()
+	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+		return "", fmt.Errorf("failed to get PR comments: %w", err)
+	}
+
+	if len(comments) == 0 {
+		return "No comments found on this PR.", nil
+	}
+
+	var result strings.Builder
+	result.WriteString(fmt.Sprintf("Found %d comments:\n\n", len(comments)))
+
+	for i, comment := range comments {
+		if i >= 10 { // Limit to first 10 comments
+			result.WriteString("... (remaining comments truncated)\n")
+			break
+		}
+		result.WriteString(fmt.Sprintf("Comment by %s:\n%s\n\n", 
+			comment.GetUser().GetLogin(), comment.GetBody()))
+	}
+
+	return result.String(), nil
+}

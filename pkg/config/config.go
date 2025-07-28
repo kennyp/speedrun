@@ -29,12 +29,14 @@ type GitHubConfig struct {
 
 // AIConfig holds AI/LLM configuration
 type AIConfig struct {
-	Enabled bool                 // Should AI Reivew the PR
-	BaseURL string               // LLM Gateway or API base URL
-	APIKey  string               // API key for authentication
-	Model   string               // Model to use (e.g., gpt-4)
-	Backoff backoffconfig.Config // AI-specific backoff overrides
-	Client  ClientTimeoutConfig  // AI-specific client settings
+	Enabled         bool                 // Should AI Reivew the PR
+	BaseURL         string               // LLM Gateway or API base URL
+	APIKey          string               // API key for authentication
+	Model           string               // Model to use (e.g., gpt-4)
+	AnalysisTimeout time.Duration        // Timeout for entire AI analysis conversation
+	ToolTimeout     time.Duration        // Timeout for individual tool executions
+	Backoff         backoffconfig.Config // AI-specific backoff overrides
+	Client          ClientTimeoutConfig  // AI-specific client settings
 }
 
 // ChecksConfig holds CI check filtering configuration
@@ -114,12 +116,14 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 			Client:              ClientTimeoutConfig{Timeout: githubClientTimeout},
 		},
 		AI: AIConfig{
-			Enabled: cmd.Bool("ai-enabled"),
-			BaseURL: cmd.String("ai-base-url"),
-			APIKey:  cmd.String("ai-api-key"),
-			Model:   cmd.String("ai-model"),
-			Backoff: aiBackoff,
-			Client:  ClientTimeoutConfig{Timeout: aiClientTimeout},
+			Enabled:         cmd.Bool("ai-enabled"),
+			BaseURL:         cmd.String("ai-base-url"),
+			APIKey:          cmd.String("ai-api-key"),
+			Model:           cmd.String("ai-model"),
+			AnalysisTimeout: cmd.Duration("ai-analysis-timeout"),
+			ToolTimeout:     cmd.Duration("ai-tool-timeout"),
+			Backoff:         aiBackoff,
+			Client:          ClientTimeoutConfig{Timeout: aiClientTimeout},
 		},
 		Checks: ChecksConfig{
 			Ignored:  checksIgnored,

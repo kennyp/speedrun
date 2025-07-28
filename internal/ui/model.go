@@ -1039,7 +1039,7 @@ func (m Model) triggerAIAnalysisIfReady(itemIndex int) tea.Cmd {
 		item.PR.HeadSHA != "" {
 
 		slog.Debug("All conditions met, triggering AI analysis", slog.Any("pr", item.PR))
-		return FetchAIAnalysisCmd(m.aiAgent, item.PR, item.DiffStats, item.CheckStatus, item.Reviews, item.ID)
+		return FetchAIAnalysisCmd(m.aiAgent, item.PR, item.DiffStats, item.CheckStatus, item.Reviews, item.ID, m.config.AI.AnalysisTimeout)
 	}
 
 	slog.Debug("AI analysis conditions not met", slog.Any("pr", item.PR))
