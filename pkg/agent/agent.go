@@ -3,7 +3,9 @@ package agent
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
+	"log/slog"
 	"strings"
 	"text/template"
 
@@ -42,10 +44,11 @@ type Agent struct {
 	client        *openai.Client
 	model         string
 	backoffConfig backoffconfig.Config
+	toolRegistry  *ToolRegistry
 }
 
 // NewAgent creates a new AI agent
-func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config) *Agent {
+func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config, toolRegistry *ToolRegistry) *Agent {
 	var opts []option.RequestOption
 
 	if baseURL != "" {
@@ -58,6 +61,7 @@ func NewAgent(baseURL, apiKey, model string, backoffConfig backoffconfig.Config)
 		client:        &client,
 		model:         model,
 		backoffConfig: backoffConfig,
+		toolRegistry:  toolRegistry,
 	}
 }
 
@@ -68,41 +72,132 @@ func (a *Agent) AnalyzePR(ctx context.Context, prData PRData) (*Analysis, error)
 		return nil, fmt.Errorf("failed to generate prompt (%w)", err)
 	}
 
-	var response *openai.ChatCompletion
-	operation := func() error {
-		var apiErr error
-		response, apiErr = a.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			Messages: []openai.ChatCompletionMessageParamUnion{
-				openai.DeveloperMessage(DeveloperMessage),
-				openai.UserMessage(prompt),
-			},
-			Model: a.model,
-		})
-		return apiErr
+	// Initialize the conversation
+	messages := []openai.ChatCompletionMessageParamUnion{
+		openai.DeveloperMessage(DeveloperMessage),
+		openai.UserMessage(prompt),
 	}
 
-	exponentialBackoff := a.backoffConfig.ToExponentialBackoff()
-	if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
-		return nil, fmt.Errorf("failed to get AI response: %w", err)
+	// Execute conversation with tool support
+	finalResponse, err := a.executeConversation(ctx, messages)
+	if err != nil {
+		return nil, fmt.Errorf("failed to execute conversation: %w", err)
 	}
 
-	if len(response.Choices) == 0 {
-		return nil, fmt.Errorf("no response from AI model")
-	}
+	return a.parseResponse(finalResponse), nil
+}
 
-	content := response.Choices[0].Message.Content
-	return a.parseResponse(content), nil
+// executeConversation handles the conversation loop with tool calling support
+func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion) (string, error) {
+	const maxIterations = 10 // Prevent infinite loops
+	
+	for iteration := 0; iteration < maxIterations; iteration++ {
+		slog.Debug("Executing conversation iteration", slog.Int("iteration", iteration))
+		
+		// Prepare chat completion parameters
+		params := openai.ChatCompletionNewParams{
+			Messages: messages,
+			Model:    a.model,
+		}
+		
+		// Add tools if available
+		if a.toolRegistry != nil {
+			tools := a.toolRegistry.GetOpenAITools()
+			if len(tools) > 0 {
+				params.Tools = tools
+			}
+		}
+
+		var response *openai.ChatCompletion
+		operation := func() error {
+			var apiErr error
+			response, apiErr = a.client.Chat.Completions.New(ctx, params)
+			return apiErr
+		}
+
+		exponentialBackoff := a.backoffConfig.ToExponentialBackoff()
+		if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err != nil {
+			return "", fmt.Errorf("failed to get AI response: %w", err)
+		}
+
+		if len(response.Choices) == 0 {
+			return "", fmt.Errorf("no response from AI model")
+		}
+
+		choice := response.Choices[0]
+		
+		// Add assistant's message to conversation
+		messages = append(messages, openai.AssistantMessage(choice.Message.Content))
+		
+		// Check if the assistant wants to use tools
+		if choice.Message.ToolCalls != nil && len(choice.Message.ToolCalls) > 0 {
+			slog.Debug("Processing tool calls", slog.Int("count", len(choice.Message.ToolCalls)))
+			
+			// Execute tool calls
+			for _, toolCall := range choice.Message.ToolCalls {
+				result, err := a.executeToolCall(ctx, toolCall)
+				if err != nil {
+					slog.Error("Tool call failed", slog.String("tool", toolCall.Function.Name), slog.Any("error", err))
+					result = fmt.Sprintf("Error: %v", err)
+				}
+				
+				// Add tool result to conversation
+				messages = append(messages, openai.ToolMessage(toolCall.ID, result))
+			}
+			
+			// Continue the conversation to get the final response
+			continue
+		}
+		
+		// No tool calls, return the final response
+		return choice.Message.Content, nil
+	}
+	
+	return "", fmt.Errorf("conversation exceeded maximum iterations (%d)", maxIterations)
+}
+
+// executeToolCall executes a single tool call
+func (a *Agent) executeToolCall(ctx context.Context, toolCall openai.ChatCompletionMessageToolCall) (string, error) {
+	if a.toolRegistry == nil {
+		return "", fmt.Errorf("no tool registry available")
+	}
+	
+	tool, exists := a.toolRegistry.Get(toolCall.Function.Name)
+	if !exists {
+		return "", fmt.Errorf("unknown tool: %s", toolCall.Function.Name)
+	}
+	
+	slog.Debug("Executing tool", slog.String("name", toolCall.Function.Name), slog.String("args", toolCall.Function.Arguments))
+	
+	// Parse arguments as JSON
+	var args json.RawMessage
+	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
+		return "", fmt.Errorf("invalid tool arguments: %w", err)
+	}
+	
+	// Execute the tool
+	return tool.Execute(ctx, args)
 }
 
 // PRData represents the data about a PR for analysis
 type PRData struct {
-	Title        string
-	Number       int
-	Additions    int
-	Deletions    int
-	ChangedFiles int
-	CIStatus     string
-	Reviews      []ReviewInfo
+	Title         string
+	Number        int
+	Additions     int
+	Deletions     int
+	ChangedFiles  int
+	CIStatus      string // Deprecated: Use CheckDetails instead
+	CheckDetails  []CheckInfo
+	Reviews       []ReviewInfo
+	HasConflicts  bool
+	PRURL         string
+}
+
+// CheckInfo represents information about a CI check
+type CheckInfo struct {
+	Name        string
+	Status      string // success, failure, pending, error
+	Description string
 }
 
 // ReviewInfo represents information about a review

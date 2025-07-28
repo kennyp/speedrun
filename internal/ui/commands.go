@@ -297,6 +297,18 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 			})
 		}
 
+		// Convert check details to agent format
+		var checkDetails []agent.CheckInfo
+		if checkStatus != nil && checkStatus.Details != nil {
+			for _, detail := range checkStatus.Details {
+				checkDetails = append(checkDetails, agent.CheckInfo{
+					Name:        detail.Name,
+					Status:      detail.Status,
+					Description: detail.Description,
+				})
+			}
+		}
+
 		// Build PR data
 		prData := agent.PRData{
 			Title:        pr.Title,
@@ -304,8 +316,11 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 			Additions:    diffStats.Additions,
 			Deletions:    diffStats.Deletions,
 			ChangedFiles: diffStats.Files,
-			CIStatus:     checkStatus.State,
+			CIStatus:     checkStatus.State, // Keep for backward compatibility
+			CheckDetails: checkDetails,
 			Reviews:      agentReviews,
+			HasConflicts: false, // TODO: Fetch merge conflict status
+			PRURL:        fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.Number),
 		}
 
 		slog.Debug("Running AI analysis (not cached)", slog.Any("pr", pr))

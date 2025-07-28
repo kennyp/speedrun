@@ -57,9 +57,6 @@ func (pr *PullRequest) aiAnalysisCacheKey() string {
 
 // invalidateCache removes all cached data for this PR
 func (pr *PullRequest) invalidateCache() {
-	if pr.client.cache == nil {
-		return
-	}
 
 	// Delete all cached data for this PR
 	if err := pr.client.cache.Delete(pr.diffStatsCacheKey()); err != nil {
@@ -78,9 +75,6 @@ func (pr *PullRequest) invalidateCache() {
 
 // InvalidateCommitRelatedCache removes cached data that changes when commits are updated
 func (pr *PullRequest) InvalidateCommitRelatedCache() {
-	if pr.client.cache == nil {
-		return
-	}
 
 	// Delete commit-related cached data (but preserve reviews)
 	// Note: AI analysis cache is not deleted here since it uses HeadSHA in the key
@@ -95,9 +89,6 @@ func (pr *PullRequest) InvalidateCommitRelatedCache() {
 
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR
 func (pr *PullRequest) GetCachedAIAnalysis() (any, error) {
-	if pr.client.cache == nil {
-		return nil, fmt.Errorf("cache not available")
-	}
 
 	var cachedAnalysis any
 	cacheKey := pr.aiAnalysisCacheKey()
@@ -119,9 +110,6 @@ func (pr *PullRequest) GetCachedAIAnalysis() (any, error) {
 
 // SetCachedAIAnalysis stores AI analysis in cache for this PR
 func (pr *PullRequest) SetCachedAIAnalysis(analysis any) error {
-	if pr.client.cache == nil {
-		return fmt.Errorf("cache not available")
-	}
 
 	// Only cache valid AI analysis (not nil)
 	if analysis == nil {
@@ -174,9 +162,8 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	cacheKey := pr.reviewsCacheKey()
 
 	// Try to get from cache first
-	if pr.client.cache != nil {
-		var cachedReviews []*Review
-		if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
+	var cachedReviews []*Review
+	if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
 			// Validate cached data - if it's nil, delete the bad cache entry and fetch fresh
 			if cachedReviews != nil {
 				duration := time.Since(start)
@@ -191,7 +178,6 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 				// Fall through to fresh API call
 			}
 		}
-	}
 
 	var reviews []*github.PullRequestReview
 	operation := func() error {
@@ -221,7 +207,7 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	slog.Debug("GitHub API get reviews completed", slog.Any("pr", pr), slog.Int("count", len(result)), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results - only cache valid reviews (not nil)
-	if pr.client.cache != nil && result != nil {
+	if result != nil {
 		if err := pr.client.cache.Set(cacheKey, result); err != nil {
 			slog.Debug("Failed to cache reviews", slog.Any("error", err))
 		}
@@ -257,9 +243,8 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	cacheKey := pr.checkStatusCacheKey()
 
 	// Try to get from cache first
-	if pr.client.cache != nil {
-		var cachedStatus *CheckStatus
-		if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
+	var cachedStatus *CheckStatus
+	if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
 			// Validate cached data - if it's nil or has invalid state, delete and fetch fresh
 			if cachedStatus != nil && cachedStatus.State != "" && cachedStatus.Description != "" {
 				duration := time.Since(start)
@@ -294,7 +279,6 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 				// Fall through to fresh API call
 			}
 		}
-	}
 
 	// Get the PR details first to get the head SHA
 	var prDetails *github.PullRequest
@@ -380,7 +364,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	slog.Debug("GitHub API get check status completed", slog.Any("pr", pr), slog.Any("status", status), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results - only cache valid status (not nil and has state/description)
-	if pr.client.cache != nil && status != nil && status.State != "" && status.Description != "" {
+	if status != nil && status.State != "" && status.Description != "" {
 		if err := pr.client.cache.Set(cacheKey, status); err != nil {
 			slog.Debug("Failed to cache check status", slog.Any("error", err))
 		}
@@ -401,9 +385,8 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	cacheKey := pr.diffStatsCacheKey()
 
 	// Try to get from cache first
-	if pr.client.cache != nil {
-		var cachedStats *DiffStats
-		if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
+	var cachedStats *DiffStats
+	if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
 			// Validate cached data - if it's nil or has invalid values, delete and fetch fresh
 			if cachedStats != nil && cachedStats.Additions >= 0 && cachedStats.Deletions >= 0 && cachedStats.Files >= 0 {
 				duration := time.Since(start)
@@ -418,7 +401,6 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 				// Fall through to fresh API call
 			}
 		}
-	}
 
 	var prDetails *github.PullRequest
 	operation := func() error {
@@ -446,7 +428,7 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	slog.Debug("GitHub API get diff stats completed", slog.Any("pr", pr), slog.Any("stats", stats), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results - only cache valid stats (not nil and has non-negative values)
-	if pr.client.cache != nil && stats != nil && stats.Additions >= 0 && stats.Deletions >= 0 && stats.Files >= 0 {
+	if stats != nil && stats.Additions >= 0 && stats.Deletions >= 0 && stats.Files >= 0 {
 		if err := pr.client.cache.Set(cacheKey, stats); err != nil {
 			slog.Debug("Failed to cache diff stats", slog.Any("error", err))
 		}

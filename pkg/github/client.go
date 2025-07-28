@@ -11,14 +11,9 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/google/go-github/v73/github"
 	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
+	"github.com/kennyp/speedrun/pkg/cache"
 )
 
-// Cache interface for GitHub data caching
-type Cache interface {
-	Get(key string, dest any) error
-	Set(key string, value any) error
-	Delete(key string) error
-}
 
 // ChecksConfig holds CI check filtering configuration
 type ChecksConfig struct {
@@ -32,13 +27,13 @@ type Client struct {
 	graphqlClient *GraphQLClient
 	searchQuery   string
 	token         string
-	cache         Cache
+	cache         cache.Cache
 	backoffConfig backoffconfig.Config
 	checksConfig  ChecksConfig
 }
 
 // NewClient creates a new GitHub client
-func NewClient(ctx context.Context, token, searchQuery string, cache Cache, backoffConfig backoffconfig.Config, checksConfig ChecksConfig) (*Client, error) {
+func NewClient(ctx context.Context, token, searchQuery string, c cache.Cache, backoffConfig backoffconfig.Config, checksConfig ChecksConfig) (*Client, error) {
 	// If no token provided, try to get it from gh CLI
 	if token == "" {
 		ghToken, err := getGHToken(ctx)
@@ -56,7 +51,7 @@ func NewClient(ctx context.Context, token, searchQuery string, cache Cache, back
 		graphqlClient: graphqlClient,
 		searchQuery:   searchQuery,
 		token:         token,
-		cache:         cache,
+		cache:         c,
 		backoffConfig: backoffConfig,
 		checksConfig:  checksConfig,
 	}, nil
@@ -103,9 +98,8 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 	cacheKey := c.searchCacheKey()
 
 	// Try to get from cache first
-	if c.cache != nil {
-		var cachedPRs []*PullRequest
-		if err := c.cache.Get(cacheKey, &cachedPRs); err == nil {
+	var cachedPRs []*PullRequest
+	if err := c.cache.Get(cacheKey, &cachedPRs); err == nil {
 			// Restore client field for cached PRs since it's not serialized
 			for _, pr := range cachedPRs {
 				pr.client = c
@@ -114,7 +108,6 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 			slog.Debug("Retrieved PRs from cache", slog.String("query", c.searchQuery), slog.Int("count", len(cachedPRs)), slog.Duration("duration", duration))
 			return cachedPRs, nil
 		}
-	}
 
 	opts := &github.SearchOptions{
 		Sort:  "created",
@@ -166,10 +159,8 @@ func (c *Client) SearchPullRequests(ctx context.Context) ([]*PullRequest, error)
 	slog.Info("PR search results processed", slog.String("query", c.searchQuery), slog.Int("filtered_prs", len(prs)), slog.Duration("total_duration", time.Since(start)))
 
 	// Cache the results
-	if c.cache != nil {
-		if err := c.cache.Set(cacheKey, prs); err != nil {
-			slog.Debug("Failed to cache search results", slog.String("query", c.searchQuery), slog.Any("error", err))
-		}
+	if err := c.cache.Set(cacheKey, prs); err != nil {
+		slog.Debug("Failed to cache search results", slog.String("query", c.searchQuery), slog.Any("error", err))
 	}
 
 	return prs, nil
@@ -230,11 +221,9 @@ func (c *Client) SearchPullRequestsFresh(ctx context.Context) ([]*PullRequest, e
 	slog.Info("Fresh PR search results processed", slog.String("query", c.searchQuery), slog.Int("filtered_prs", len(prs)), slog.Duration("total_duration", time.Since(start)))
 
 	// Update the cache with fresh results
-	if c.cache != nil {
-		cacheKey := c.searchCacheKey()
-		if err := c.cache.Set(cacheKey, prs); err != nil {
-			slog.Debug("Failed to cache fresh search results", slog.String("query", c.searchQuery), slog.Any("error", err))
-		}
+	cacheKey := c.searchCacheKey()
+	if err := c.cache.Set(cacheKey, prs); err != nil {
+		slog.Debug("Failed to cache fresh search results", slog.String("query", c.searchQuery), slog.Any("error", err))
 	}
 
 	return prs, nil

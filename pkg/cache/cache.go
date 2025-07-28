@@ -12,8 +12,11 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-// Cache provides SQLite-based caching for GitHub data
-type Cache struct {
+// Ensure SQLiteCache implements Cache interface
+var _ Cache = (*SQLiteCache)(nil)
+
+// SQLiteCache provides SQLite-based caching for GitHub data
+type SQLiteCache struct {
 	db     *sql.DB
 	maxAge time.Duration
 	dbPath string
@@ -28,7 +31,7 @@ type CacheEntry struct {
 }
 
 // New creates a new cache instance
-func New(dbPath string, maxAge time.Duration) (*Cache, error) {
+func New(dbPath string, maxAge time.Duration) (Cache, error) {
 	slog.Debug("Creating cache", "path", dbPath, "max_age", maxAge)
 
 	// Ensure parent directory exists
@@ -43,7 +46,7 @@ func New(dbPath string, maxAge time.Duration) (*Cache, error) {
 		return nil, fmt.Errorf("failed to open cache database: %w", err)
 	}
 
-	cache := &Cache{
+	cache := &SQLiteCache{
 		db:     db,
 		maxAge: maxAge,
 		dbPath: dbPath,
@@ -58,7 +61,7 @@ func New(dbPath string, maxAge time.Duration) (*Cache, error) {
 }
 
 // initialize creates the cache table if it doesn't exist
-func (c *Cache) initialize() error {
+func (c *SQLiteCache) initialize() error {
 	query := `
 		CREATE TABLE IF NOT EXISTS cache_entries (
 			key TEXT PRIMARY KEY,
@@ -78,7 +81,7 @@ func (c *Cache) initialize() error {
 }
 
 // Get retrieves a cached value by key
-func (c *Cache) Get(key string, dest any) error {
+func (c *SQLiteCache) Get(key string, dest interface{}) error {
 	start := time.Now()
 	query := `
 		SELECT data, expires_at 
@@ -111,7 +114,7 @@ func (c *Cache) Get(key string, dest any) error {
 }
 
 // Set stores a value in the cache with the configured TTL
-func (c *Cache) Set(key string, value any) error {
+func (c *SQLiteCache) Set(key string, value interface{}) error {
 	start := time.Now()
 	data, err := json.Marshal(value)
 	if err != nil {
@@ -139,7 +142,7 @@ func (c *Cache) Set(key string, value any) error {
 }
 
 // Delete removes a cache entry by key
-func (c *Cache) Delete(key string) error {
+func (c *SQLiteCache) Delete(key string) error {
 	start := time.Now()
 	query := `DELETE FROM cache_entries WHERE key = ?`
 
@@ -155,7 +158,7 @@ func (c *Cache) Delete(key string) error {
 }
 
 // Clear removes all cache entries
-func (c *Cache) Clear() error {
+func (c *SQLiteCache) Clear() error {
 	query := `DELETE FROM cache_entries`
 
 	if _, err := c.db.Exec(query); err != nil {
@@ -166,7 +169,7 @@ func (c *Cache) Clear() error {
 }
 
 // Cleanup removes expired entries from the cache
-func (c *Cache) Cleanup() error {
+func (c *SQLiteCache) Cleanup() error {
 	query := `DELETE FROM cache_entries WHERE expires_at <= datetime('now')`
 
 	result, err := c.db.Exec(query)
@@ -187,7 +190,7 @@ func (c *Cache) Cleanup() error {
 }
 
 // Stats returns cache statistics
-func (c *Cache) Stats() (*CacheStats, error) {
+func (c *SQLiteCache) Stats() (*CacheStats, error) {
 	var total, expired int64
 
 	// Get total entries
@@ -211,7 +214,7 @@ func (c *Cache) Stats() (*CacheStats, error) {
 }
 
 // Close closes the cache database connection
-func (c *Cache) Close() error {
+func (c *SQLiteCache) Close() error {
 	if c.db != nil {
 		return c.db.Close()
 	}

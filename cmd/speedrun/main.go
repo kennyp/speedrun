@@ -145,6 +145,16 @@ func main() {
 			},
 
 			// Cache settings
+			&cli.BoolWithInverseFlag{
+				Name:     "cache-enabled",
+				Usage:    "Enable caching",
+				Category: "Cache",
+				Value:    true,
+				Sources: cli.NewValueSourceChain(
+					cli.EnvVar("SPEEDRUN_CACHE_ENABLED"),
+					config.OpTOMLValueSource("cache.enabled", configFile),
+				),
+			},
 			&cli.StringFlag{
 				Name:     "cache-path",
 				Usage:    "cache database file path",
@@ -491,23 +501,32 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	}
 
 	// Initialize cache
-	slog.Debug("Initializing cache", "path", cfg.Cache.Path, "max_age", cfg.Cache.MaxAge)
-	cacheInstance, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAge)
-	if err != nil {
-		slog.Error("Failed to initialize cache", "error", err)
-		return fmt.Errorf("failed to initialize cache: %w", err)
-	}
-	defer func() {
-		if err := cacheInstance.Close(); err != nil {
-			slog.Error("Failed to close cache", slog.Any("error", err))
+	var cacheInstance cache.Cache
+	if cfg.Cache.Enabled {
+		slog.Debug("Initializing cache", "path", cfg.Cache.Path, "max_age", cfg.Cache.MaxAge)
+		c, err := cache.New(cfg.Cache.Path, cfg.Cache.MaxAge)
+		if err != nil {
+			slog.Error("Failed to initialize cache", "error", err)
+			return fmt.Errorf("failed to initialize cache: %w", err)
 		}
-	}()
+		cacheInstance = c
+		defer func() {
+			if err := cacheInstance.Close(); err != nil {
+				slog.Error("Failed to close cache", slog.Any("error", err))
+			}
+		}()
 
-	// Cleanup expired cache entries on startup
-	slog.Debug("Cleaning up expired cache entries...")
-	if err := cacheInstance.Cleanup(); err != nil {
-		slog.Warn("Failed to cleanup cache", "error", err)
-		fmt.Printf("Warning: failed to cleanup cache: %v\n", err)
+		// Cleanup expired cache entries on startup
+		slog.Debug("Cleaning up expired cache entries...")
+		if err := cacheInstance.Cleanup(); err != nil {
+			slog.Warn("Failed to cleanup cache", "error", err)
+			fmt.Printf("Warning: failed to cleanup cache: %v\n", err)
+		}
+		fmt.Printf("💾 Cache enabled at %s\n", cfg.Cache.Path)
+	} else {
+		slog.Debug("Cache disabled")
+		fmt.Printf("💾 Cache disabled\n")
+		cacheInstance = cache.NewNoOpCache()
 	}
 
 	// Create GitHub client
@@ -543,7 +562,11 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	var aiAgent *agent.Agent
 	if cfg.AI.Enabled {
 		slog.Debug("Creating AI agent", "model", cfg.AI.Model, "base_url", cfg.AI.BaseURL)
-		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff)
+		
+		// Create tool registry for agent
+		toolRegistry := agent.NewToolRegistry(githubClient)
+		
+		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff, toolRegistry)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)
 		slog.Info("AI agent initialized", "model", cfg.AI.Model)
 	} else {

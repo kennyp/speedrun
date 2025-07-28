@@ -45,8 +45,9 @@ type ChecksConfig struct {
 
 // CacheConfig holds cache-related configuration
 type CacheConfig struct {
-	Path   string        // Cache directory path
-	MaxAge time.Duration // Maximum age of cache entries (e.g., 7*24*time.Hour)
+	Enabled bool          // Whether caching is enabled
+	Path    string        // Cache directory path
+	MaxAge  time.Duration // Maximum age of cache entries (e.g., 7*24*time.Hour)
 }
 
 // LogConfig holds logging configuration
@@ -125,8 +126,9 @@ func LoadFromCLI(cmd *cli.Command) *Config {
 			Required: checksRequired,
 		},
 		Cache: CacheConfig{
-			Path:   cmd.String("cache-path"),
-			MaxAge: cmd.Duration("cache-max-age"),
+			Enabled: cmd.Bool("cache-enabled"),
+			Path:    cmd.String("cache-path"),
+			MaxAge:  cmd.Duration("cache-max-age"),
 		},
 		Log: LogConfig{
 			Level: cmd.String("log-level"),
