@@ -14,9 +14,9 @@ import (
 
 // Cache provides SQLite-based caching for GitHub data
 type Cache struct {
-	db      *sql.DB
-	maxAge  time.Duration
-	dbPath  string
+	db     *sql.DB
+	maxAge time.Duration
+	dbPath string
 }
 
 // CacheEntry represents a cached item
@@ -30,7 +30,7 @@ type CacheEntry struct {
 // New creates a new cache instance
 func New(dbPath string, maxAge time.Duration) (*Cache, error) {
 	slog.Debug("Creating cache", "path", dbPath, "max_age", maxAge)
-	
+
 	// Ensure parent directory exists
 	cacheDir := filepath.Dir(dbPath)
 	if err := os.MkdirAll(cacheDir, 0755); err != nil {
@@ -88,10 +88,10 @@ func (c *Cache) Get(key string, dest interface{}) error {
 
 	var data []byte
 	var expiresAt string
-	
+
 	err := c.db.QueryRow(query, key).Scan(&data, &expiresAt)
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		if err == sql.ErrNoRows {
 			slog.Debug("Cache miss", slog.String("key", key), slog.Duration("duration", duration))
@@ -142,7 +142,7 @@ func (c *Cache) Set(key string, value interface{}) error {
 func (c *Cache) Delete(key string) error {
 	start := time.Now()
 	query := `DELETE FROM cache_entries WHERE key = ?`
-	
+
 	if _, err := c.db.Exec(query, key); err != nil {
 		duration := time.Since(start)
 		slog.Debug("Cache delete failed", slog.String("key", key), slog.Duration("duration", duration), slog.Any("error", err))
@@ -157,7 +157,7 @@ func (c *Cache) Delete(key string) error {
 // Clear removes all cache entries
 func (c *Cache) Clear() error {
 	query := `DELETE FROM cache_entries`
-	
+
 	if _, err := c.db.Exec(query); err != nil {
 		return fmt.Errorf("failed to clear cache: %w", err)
 	}
@@ -168,7 +168,7 @@ func (c *Cache) Clear() error {
 // Cleanup removes expired entries from the cache
 func (c *Cache) Cleanup() error {
 	query := `DELETE FROM cache_entries WHERE expires_at <= datetime('now')`
-	
+
 	result, err := c.db.Exec(query)
 	if err != nil {
 		return fmt.Errorf("failed to cleanup cache: %w", err)

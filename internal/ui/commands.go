@@ -59,6 +59,12 @@ type AutoMergeEnabledMsg struct {
 	Err  error
 }
 
+// PRMergedMsg is sent when a PR has been merged directly
+type PRMergedMsg struct {
+	PRID int64
+	Err  error
+}
+
 // StatusMsg is a general status update message
 type StatusMsg string
 
@@ -80,13 +86,13 @@ func FetchPRsCmd(client *github.Client) tea.Cmd {
 
 		prs, err := client.SearchPullRequests(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Error("PR search failed", slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Info("PR search completed", slog.Int("count", len(prs)), slog.Duration("duration", duration))
 		}
-		
+
 		return PRsLoadedMsg{PRs: prs, Err: err}
 	}
 }
@@ -101,13 +107,13 @@ func FetchDiffStatsCmd(client *github.Client, pr *github.PullRequest, prID int64
 
 		stats, err := pr.GetDiffStats(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Debug("Diff stats failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Debug("Diff stats loaded", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("stats", stats))
 		}
-		
+
 		return DiffStatsLoadedMsg{
 			PRID:  prID,
 			Stats: stats,
@@ -126,13 +132,13 @@ func FetchCheckStatusCmd(client *github.Client, pr *github.PullRequest, prID int
 
 		status, err := pr.GetCheckStatus(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Debug("Check status failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Debug("Check status loaded", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("status", status))
 		}
-		
+
 		return CheckStatusLoadedMsg{
 			PRID:   prID,
 			Status: status,
@@ -151,7 +157,7 @@ func FetchReviewsCmd(client *github.Client, pr *github.PullRequest, username str
 
 		reviews, err := pr.GetReviews(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Debug("Reviews failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
@@ -166,10 +172,10 @@ func FetchReviewsCmd(client *github.Client, pr *github.PullRequest, username str
 					}
 				}
 			}
-			slog.Debug("Reviews loaded", slog.Any("pr", pr), slog.Duration("duration", duration), 
+			slog.Debug("Reviews loaded", slog.Any("pr", pr), slog.Duration("duration", duration),
 				slog.Int("total_reviews", len(reviews)), slog.Bool("user_reviewed", userReviewed), slog.Bool("user_approved", userApproved))
 		}
-		
+
 		return ReviewsLoadedMsg{
 			PRID:    prID,
 			Reviews: reviews,
@@ -188,13 +194,13 @@ func ApprovePRCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 
 		err := pr.Approve(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Error("PR approval failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Info("PR approved successfully", slog.Any("pr", pr), slog.Duration("duration", duration))
 		}
-		
+
 		return PRApprovedMsg{
 			PRID: prID,
 			Err:  err,
@@ -212,14 +218,38 @@ func EnableAutoMergeCmd(pr *github.PullRequest, mergeMethod string, prID int64) 
 
 		err := pr.EnableAutoMerge(ctx, mergeMethod)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Error("Auto-merge enabling failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Info("Auto-merge enabled successfully", slog.Any("pr", pr), slog.Duration("duration", duration))
 		}
-		
+
 		return AutoMergeEnabledMsg{
+			PRID: prID,
+			Err:  err,
+		}
+	}
+}
+
+// MergeCmd merges a PR directly
+func MergeCmd(pr *github.PullRequest, mergeMethod string, prID int64) tea.Cmd {
+	return func() tea.Msg {
+		slog.Info("Merging PR", slog.Any("pr", pr), slog.String("merge_method", mergeMethod))
+		start := time.Now()
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+
+		err := pr.Merge(ctx, mergeMethod)
+		duration := time.Since(start)
+
+		if err != nil {
+			slog.Error("PR merging failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
+		} else {
+			slog.Info("PR merged successfully", slog.Any("pr", pr), slog.Duration("duration", duration))
+		}
+
+		return PRMergedMsg{
 			PRID: prID,
 			Err:  err,
 		}
@@ -248,7 +278,7 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
 			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
 				duration := time.Since(start)
-				slog.Debug("AI analysis loaded from cache", slog.Any("pr", pr), slog.Duration("duration", duration), 
+				slog.Debug("AI analysis loaded from cache", slog.Any("pr", pr), slog.Duration("duration", duration),
 					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 				return AIAnalysisLoadedMsg{
 					PRID:     prID,
@@ -281,11 +311,11 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 		slog.Debug("Running AI analysis (not cached)", slog.Any("pr", pr))
 		analysis, err := aiAgent.AnalyzePR(ctx, prData)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Debug("AI analysis failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
-			slog.Debug("AI analysis completed", slog.Any("pr", pr), slog.Duration("duration", duration), 
+			slog.Debug("AI analysis completed", slog.Any("pr", pr), slog.Duration("duration", duration),
 				slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 			// Cache the analysis result
 			pr.SetCachedAIAnalysis(analysis)
@@ -303,11 +333,11 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 func FetchCachedAIAnalysisCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Loading cached AI analysis", slog.Any("pr", pr))
-		
+
 		// Check for cached AI analysis
 		if cachedAnalysis, err := pr.GetCachedAIAnalysis(); err == nil {
 			if analysis, ok := cachedAnalysis.(*agent.Analysis); ok {
-				slog.Debug("Cached AI analysis found", slog.Any("pr", pr), 
+				slog.Debug("Cached AI analysis found", slog.Any("pr", pr),
 					slog.Any("recommendation", analysis.Recommendation), slog.String("risk", analysis.RiskLevel))
 				return AIAnalysisLoadedMsg{
 					PRID:     prID,
@@ -316,7 +346,7 @@ func FetchCachedAIAnalysisCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 				}
 			}
 		}
-		
+
 		// No cached analysis found - this shouldn't happen if we checked properly
 		slog.Debug("No cached AI analysis found", slog.Any("pr", pr))
 		return nil
@@ -328,7 +358,7 @@ func FetchCachedAIAnalysisCmd(pr *github.PullRequest, prID int64) tea.Cmd {
 func TriggerAIAnalysisWhenReadyCmd(aiAgent *agent.Agent, pr *github.PullRequest, prID int64) tea.Cmd {
 	return func() tea.Msg {
 		slog.Debug("Checking if AI analysis can be triggered", slog.Any("pr", pr))
-		
+
 		// This command will be processed by the model's Update method
 		// which will check if all conditions are met and trigger the actual AI analysis
 		return TriggerAIAnalysisMsg{
@@ -352,13 +382,13 @@ func SmartRefreshCmd(client *github.Client) tea.Cmd {
 
 		prs, err := client.SearchPullRequestsFresh(ctx)
 		duration := time.Since(start)
-		
+
 		if err != nil {
 			slog.Error("Smart refresh failed", slog.Duration("duration", duration), slog.Any("error", err))
 		} else {
 			slog.Info("Smart refresh completed", slog.Int("count", len(prs)), slog.Duration("duration", duration))
 		}
-		
+
 		return SmartRefreshLoadedMsg{PRs: prs, Err: err}
 	}
 }

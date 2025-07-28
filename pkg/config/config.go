@@ -3,8 +3,8 @@ package config
 import (
 	"time"
 
-	"github.com/urfave/cli/v3"
 	backoffconfig "github.com/kennyp/speedrun/pkg/backoff"
+	"github.com/urfave/cli/v3"
 )
 
 // Config represents the complete speedrun configuration
@@ -19,8 +19,8 @@ type Config struct {
 
 // GitHubConfig holds GitHub-related configuration
 type GitHubConfig struct {
-	Token            string // GitHub personal access token
-	SearchQuery      string // GitHub search query for PRs
+	Token               string // GitHub personal access token
+	SearchQuery         string // GitHub search query for PRs
 	AutoMergeOnApproval string // Auto-merge behavior on approval: "true", "false", or "ask"
 }
 
@@ -50,13 +50,12 @@ type LogConfig struct {
 	Path  string // Log file path (empty for stderr)
 }
 
-
 // LoadFromCLI loads configuration from CLI context
 func LoadFromCLI(cmd *cli.Command) *Config {
 	return &Config{
 		GitHub: GitHubConfig{
-			Token:            cmd.String("github-token"),
-			SearchQuery:      cmd.String("github-search-query"),
+			Token:               cmd.String("github-token"),
+			SearchQuery:         cmd.String("github-search-query"),
 			AutoMergeOnApproval: cmd.String("auto-merge-on-approval"),
 		},
 		AI: AIConfig{
@@ -86,4 +85,3 @@ func (c *Config) Validate() error {
 	// Validation will be added as needed
 	return nil
 }
-

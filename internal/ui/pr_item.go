@@ -9,29 +9,29 @@ import (
 
 // PRItem represents a PR in the list
 type PRItem struct {
-	ID          int64               // Unique atomic ID for this PR item
+	ID          int64 // Unique atomic ID for this PR item
 	PR          *github.PullRequest
 	DiffStats   *github.DiffStats
 	CheckStatus *github.CheckStatus
 	Reviews     []*github.Review
 	AIAnalysis  *agent.Analysis
-	
+
 	// Loading states
-	LoadingDiff     bool
-	LoadingChecks   bool
-	LoadingReviews  bool
-	LoadingAI       bool
-	
+	LoadingDiff    bool
+	LoadingChecks  bool
+	LoadingReviews bool
+	LoadingAI      bool
+
 	// Completion states
 	Approved  bool
 	Reviewed  bool // Has the current user reviewed this PR?
 	Dismissed bool // Has the current user's review been dismissed?
-	
+
 	// Errors
-	DiffError    error
-	CheckError   error
-	ReviewError  error
-	AIError      error
+	DiffError   error
+	CheckError  error
+	ReviewError error
+	AIError     error
 }
 
 // Title implements list.Item
@@ -40,7 +40,7 @@ func (i PRItem) Title() string {
 	if i.Approved {
 		status = "✅"
 	} else if i.Dismissed {
-		status = "⚠️"  // Warning for dismissed reviews
+		status = "⚠️" // Warning for dismissed reviews
 	} else if i.Reviewed {
 		status = "👀"
 	} else if i.AIAnalysis != nil {
@@ -53,7 +53,7 @@ func (i PRItem) Title() string {
 func (i PRItem) Description() string {
 	// Build description from available data immediately
 	desc := ""
-	
+
 	// Diff stats
 	if i.DiffStats != nil {
 		desc += fmt.Sprintf("📊 +%d/-%d lines, %d files",
@@ -63,7 +63,7 @@ func (i PRItem) Description() string {
 	} else if i.DiffError != nil {
 		desc += "📊 ⚠️ Diff error"
 	}
-	
+
 	// Check status
 	if i.CheckStatus != nil {
 		if desc != "" {
@@ -82,7 +82,7 @@ func (i PRItem) Description() string {
 		}
 		desc += "🔧 ⚠️ Check error"
 	}
-	
+
 	// Reviews
 	if len(i.Reviews) > 0 {
 		if desc != "" {
@@ -100,7 +100,7 @@ func (i PRItem) Description() string {
 		}
 		desc += "👥 ⚠️ Review error"
 	}
-	
+
 	// AI Analysis
 	if i.AIAnalysis != nil {
 		if desc != "" {
@@ -120,11 +120,11 @@ func (i PRItem) Description() string {
 		}
 		desc += "🤖 ⚠️ AI error"
 	}
-	
+
 	if desc == "" {
 		desc = "Loading PR details..."
 	}
-	
+
 	return desc
 }
 

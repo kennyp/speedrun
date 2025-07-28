@@ -8,10 +8,10 @@ import (
 
 // Config holds backoff configuration
 type Config struct {
-	MaxElapsedTime  time.Duration
-	InitialInterval time.Duration
-	MaxInterval     time.Duration
-	Multiplier      float64
+	MaxElapsedTime      time.Duration
+	InitialInterval     time.Duration
+	MaxInterval         time.Duration
+	Multiplier          float64
 	RandomizationFactor float64
 }
 
@@ -63,7 +63,7 @@ func (c *Config) ToExponentialBackoff() *backoff.ExponentialBackOff {
 // WithDefaults returns a config with default values filled in for zero values
 func (c *Config) WithDefaults(defaults Config) Config {
 	result := *c
-	
+
 	if result.MaxElapsedTime == 0 {
 		result.MaxElapsedTime = defaults.MaxElapsedTime
 	}
@@ -79,6 +79,6 @@ func (c *Config) WithDefaults(defaults Config) Config {
 	if result.RandomizationFactor == 0 {
 		result.RandomizationFactor = defaults.RandomizationFactor
 	}
-	
+
 	return result
 }

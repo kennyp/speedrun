@@ -55,8 +55,8 @@ type AutoMergeInput struct {
 type AutoMergeResponse struct {
 	EnablePullRequestAutoMerge struct {
 		PullRequest struct {
-			ID                string `json:"id"`
-			AutoMergeRequest  *struct {
+			ID               string `json:"id"`
+			AutoMergeRequest *struct {
 				EnabledAt string `json:"enabledAt"`
 				EnabledBy struct {
 					Login string `json:"login"`
@@ -163,40 +163,40 @@ func (c *GraphQLClient) GetPullRequestNodeID(ctx context.Context, owner, repo st
 // formatGraphQLError converts common GraphQL error messages to user-friendly messages
 func formatGraphQLError(message string) string {
 	lowerMsg := strings.ToLower(message)
-	
+
 	// Common auto-merge error scenarios
 	if strings.Contains(lowerMsg, "pull request is in clean status") {
 		return "Cannot enable auto-merge: pull request has no failing checks to resolve. Auto-merge is only available when there are pending or failing checks that need to pass first."
 	}
-	
+
 	if strings.Contains(lowerMsg, "pull request is not mergeable") {
 		return "Cannot enable auto-merge: pull request is not in a mergeable state. This could be due to merge conflicts, required status checks failing, or branch protection rules."
 	}
-	
+
 	if strings.Contains(lowerMsg, "auto-merge is already enabled") {
 		return "Auto-merge is already enabled for this pull request."
 	}
-	
+
 	if strings.Contains(lowerMsg, "pull request is closed") {
 		return "Cannot enable auto-merge: pull request is closed."
 	}
-	
+
 	if strings.Contains(lowerMsg, "pull request is merged") {
 		return "Cannot enable auto-merge: pull request is already merged."
 	}
-	
+
 	if strings.Contains(lowerMsg, "pull request is draft") {
 		return "Cannot enable auto-merge: pull request is in draft status. Please mark it as ready for review first."
 	}
-	
+
 	if strings.Contains(lowerMsg, "insufficient permissions") || strings.Contains(lowerMsg, "permission") {
 		return "Cannot enable auto-merge: insufficient permissions. You may need write access to the repository or admin permissions depending on branch protection settings."
 	}
-	
+
 	if strings.Contains(lowerMsg, "branch protection") {
 		return "Cannot enable auto-merge: branch protection rules prevent auto-merge. Check the repository's branch protection settings."
 	}
-	
+
 	// Return empty string if no friendly message found
 	return ""
 }

@@ -21,23 +21,23 @@ import (
 // Styles
 var (
 	titleStyle = lipgloss.NewStyle().
-		Background(lipgloss.Color("#7D56F4")).
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Padding(0, 1)
+			Background(lipgloss.Color("#7D56F4")).
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Padding(0, 1)
 
 	statusStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FAFAFA")).
-		Background(lipgloss.Color("#7D56F4")).
-		Padding(0, 1)
+			Foreground(lipgloss.Color("#FAFAFA")).
+			Background(lipgloss.Color("#7D56F4")).
+			Padding(0, 1)
 
 	helpStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#626262"))
+			Foreground(lipgloss.Color("#626262"))
 
 	errorStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#FF0000"))
+			Foreground(lipgloss.Color("#FF0000"))
 
 	successStyle = lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#00FF00"))
+			Foreground(lipgloss.Color("#00FF00"))
 )
 
 // Global atomic counter for generating unique PR IDs
@@ -73,7 +73,7 @@ func (m Model) triggerAIAnalysisIfReadyByID(id int64) tea.Cmd {
 		slog.Debug("PR not found for AI analysis trigger", slog.Int64("prID", id))
 		return nil
 	}
-	
+
 	// Convert back to index for the existing function
 	for i := range m.items {
 		if m.items[i].ID == id {
@@ -90,22 +90,22 @@ type Model struct {
 	github   *github.Client
 	aiAgent  *agent.Agent
 	username string
-	
+
 	list     list.Model
 	items    []PRItem
 	status   string
 	quitting bool
 	spinner  spinner.Model
-	
+
 	// Loading states
 	loadingPRs bool
-	
+
 	// Filter state
 	showOnlyUnreviewed bool
-	
+
 	// Key bindings
 	keys KeyMap
-	
+
 	// Popup state
 	showPopup      bool
 	popupContent   string
@@ -114,13 +114,13 @@ type Model struct {
 
 // KeyMap defines key bindings
 type KeyMap struct {
-	Approve   key.Binding
-	Skip      key.Binding
-	View      key.Binding
-	Filter    key.Binding
-	Details   key.Binding
-	Quit      key.Binding
-	Refresh   key.Binding
+	Approve key.Binding
+	Skip    key.Binding
+	View    key.Binding
+	Filter  key.Binding
+	Details key.Binding
+	Quit    key.Binding
+	Refresh key.Binding
 }
 
 // DefaultKeyMap returns the default key bindings
@@ -172,17 +172,17 @@ func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Clie
 	s.Style = lipgloss.NewStyle().Foreground(lipgloss.Color("205"))
 
 	return Model{
-		ctx:      ctx,
-		config:   cfg,
-		github:   githubClient,
-		aiAgent:  aiAgent,
-		username: username,
-		list:     l,
-		items:    []PRItem{},
-		status:   "Loading pull requests...",
-		spinner:  s,
-		keys:     DefaultKeyMap(),
-		loadingPRs: true,
+		ctx:                ctx,
+		config:             cfg,
+		github:             githubClient,
+		aiAgent:            aiAgent,
+		username:           username,
+		list:               l,
+		items:              []PRItem{},
+		status:             "Loading pull requests...",
+		spinner:            s,
+		keys:               DefaultKeyMap(),
+		loadingPRs:         true,
 		showOnlyUnreviewed: true, // Default to showing only unreviewed PRs
 	}
 }
@@ -245,7 +245,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil // Consume all other keys when popup is open
 		}
-		
+
 		// Allow navigation even when loading
 		switch {
 		case key.Matches(msg, m.keys.Quit):
@@ -269,7 +269,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case key.Matches(msg, m.keys.Refresh):
 			return m.handleRefresh()
-			
+
 		case key.Matches(msg, key.NewBinding(key.WithKeys("m"))):
 			// Handle auto-merge from main list
 			return m.handleAutoMerge()
@@ -303,9 +303,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case PRApprovedMsg:
 		return m.handlePRApproved(msg)
-		
+
 	case AutoMergeEnabledMsg:
 		return m.handleAutoMergeEnabled(msg)
+
+	case PRMergedMsg:
+		return m.handlePRMerged(msg)
 
 	case StatusMsg:
 		m.status = string(msg)
@@ -353,12 +356,12 @@ func (m Model) View() string {
 		statusStyle.Render(status),
 		help,
 	)
-	
+
 	// Overlay popup if shown
 	if m.showPopup {
 		return m.renderPopup(baseView)
 	}
-	
+
 	return baseView
 }
 
@@ -385,25 +388,25 @@ func (m Model) renderPRDetails(item PRItem) string {
 
 func (m Model) handlePRsLoaded(msg PRsLoadedMsg) (Model, tea.Cmd) {
 	m.loadingPRs = false
-	
+
 	if msg.Err != nil {
 		slog.Error("Failed to load PRs in UI", slog.Any("error", msg.Err))
 		m.status = errorStyle.Render("Failed to load PRs: " + msg.Err.Error())
 		return m, nil
 	}
-	
-	slog.Info("PRs loaded in UI", slog.Int("pr_count", len(msg.PRs)), 
+
+	slog.Info("PRs loaded in UI", slog.Int("pr_count", len(msg.PRs)),
 		slog.Bool("show_only_unreviewed", m.showOnlyUnreviewed))
 
 	// Create list items for all PRs (filtering will happen dynamically as review data loads)
 	m.items = make([]PRItem, len(msg.PRs))
-	
+
 	for i, pr := range msg.PRs {
 		// Check if AI analysis is already cached
 		// Note: Skip cache check during startup since HeadSHA is not available yet
 		// AI analysis will check cache properly when HeadSHA is populated
 		loadingAI := m.aiAgent != nil
-		
+
 		m.items[i] = PRItem{
 			ID:             nextPRID.Add(1),
 			PR:             pr,
@@ -434,15 +437,15 @@ func (m Model) handlePRsLoaded(msg PRsLoadedMsg) (Model, tea.Cmd) {
 			FetchCheckStatusCmd(m.github, pr, prID),
 			FetchReviewsCmd(m.github, pr, m.username, prID),
 		}
-		
-		// Add AI analysis to the sequence  
+
+		// Add AI analysis to the sequence
 		if !m.items[i].LoadingAI {
 			// Load cached AI analysis immediately if available
 			prSequence = append(prSequence, FetchCachedAIAnalysisCmd(pr, prID))
 		}
 		// Note: For LoadingAI=true, AI analysis will be triggered by the message handlers
 		// when all prerequisites (diff, checks, reviews) are loaded
-		
+
 		// Add small delay between PR sequences to avoid overwhelming the API
 		delay := time.Duration(i*100) * time.Millisecond
 		if delay > 0 {
@@ -463,10 +466,10 @@ func (m Model) handleDiffStatsLoaded(msg DiffStatsLoadedMsg) (Model, tea.Cmd) {
 		item.DiffStats = msg.Stats
 		item.DiffError = msg.Err
 	})
-	
+
 	// Re-apply filter to update the visible list
 	m = m.updateVisibleItems()
-	
+
 	// Trigger AI analysis if we have all required data and AI agent is available
 	return m, m.triggerAIAnalysisIfReadyByID(msg.PRID)
 }
@@ -477,10 +480,10 @@ func (m Model) handleCheckStatusLoaded(msg CheckStatusLoadedMsg) (Model, tea.Cmd
 		item.CheckStatus = msg.Status
 		item.CheckError = msg.Err
 	})
-	
+
 	// Re-apply filter to update the visible list
 	m = m.updateVisibleItems()
-	
+
 	// Trigger AI analysis if we have all required data and AI agent is available
 	return m, m.triggerAIAnalysisIfReadyByID(msg.PRID)
 }
@@ -488,11 +491,11 @@ func (m Model) handleCheckStatusLoaded(msg CheckStatusLoadedMsg) (Model, tea.Cmd
 func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 	var prItem *PRItem
 	m = m.updatePRByID(msg.PRID, func(item *PRItem) {
-		prItem = item  // Capture for logging
+		prItem = item // Capture for logging
 		item.LoadingReviews = false
 		item.Reviews = msg.Reviews
 		item.ReviewError = msg.Err
-		
+
 		// Check if current user has reviewed and determine review type
 		userReviewed := false
 		userApproved := false
@@ -509,23 +512,23 @@ func (m Model) handleReviewsLoaded(msg ReviewsLoadedMsg) (Model, tea.Cmd) {
 				// and we want to find the most recent status
 			}
 		}
-		
+
 		item.Reviewed = userReviewed
 		item.Approved = userApproved
 		item.Dismissed = userDismissed
 	})
-	
+
 	if prItem != nil {
-		slog.Debug("Reviews loaded for PR", slog.Any("pr", prItem.PR), 
-			slog.Int("total_reviews", len(msg.Reviews)), slog.Bool("user_reviewed", prItem.Reviewed), 
+		slog.Debug("Reviews loaded for PR", slog.Any("pr", prItem.PR),
+			slog.Int("total_reviews", len(msg.Reviews)), slog.Bool("user_reviewed", prItem.Reviewed),
 			slog.Bool("user_approved", prItem.Approved), slog.Bool("user_dismissed", prItem.Dismissed), slog.Any("error", msg.Err))
 	} else {
 		slog.Debug("Reviews loaded for unknown PR", slog.Int64("prID", msg.PRID))
 	}
-	
+
 	// Re-apply filter since review status may have changed
 	m = m.updateVisibleItems()
-	
+
 	// Trigger AI analysis if we have all required data and AI agent is available
 	return m, m.triggerAIAnalysisIfReadyByID(msg.PRID)
 }
@@ -536,10 +539,10 @@ func (m Model) handleAIAnalysisLoaded(msg AIAnalysisLoadedMsg) (Model, tea.Cmd) 
 		item.AIAnalysis = msg.Analysis
 		item.AIError = msg.Err
 	})
-	
+
 	// Re-apply filter to update the visible list
 	m = m.updateVisibleItems()
-	
+
 	return m, nil
 }
 
@@ -550,7 +553,7 @@ func (m Model) handleTriggerAIAnalysis(msg TriggerAIAnalysisMsg) (Model, tea.Cmd
 
 func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.Cmd) {
 	m.loadingPRs = false
-	
+
 	if msg.Err != nil {
 		m.status = errorStyle.Render("Failed to refresh PRs: " + msg.Err.Error())
 		return m, nil
@@ -561,7 +564,7 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 	for i := range m.items {
 		existingPRs[m.items[i].PR.Number] = &m.items[i]
 	}
-	
+
 	freshPRMap := make(map[int]*github.PullRequest)
 	for _, pr := range msg.PRs {
 		freshPRMap[pr.Number] = pr
@@ -570,28 +573,28 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 	var newItems []PRItem
 	newPRCount := 0
 	updatedPRCount := 0
-	
+
 	// Process fresh PRs from GitHub
 	for _, freshPR := range msg.PRs {
 		if existingItem, exists := existingPRs[freshPR.Number]; exists {
 			// Existing PR - check if it needs updates
 			needsAIUpdate := false
-			
+
 			// Check if PR has new commits (HeadSHA changed)
-			if existingItem.PR.HeadSHA != "" && freshPR.HeadSHA != "" && 
-			   existingItem.PR.HeadSHA != freshPR.HeadSHA {
+			if existingItem.PR.HeadSHA != "" && freshPR.HeadSHA != "" &&
+				existingItem.PR.HeadSHA != freshPR.HeadSHA {
 				needsAIUpdate = true
 				updatedPRCount++
-				
+
 				// Clear cached data for updated PR since commits changed
 				// (but preserve reviews cache since those don't change with commits)
 				existingItem.PR.InvalidateCommitRelatedCache()
 			}
-			
+
 			// Update the PR data but preserve loading states and cached data
 			updatedItem := *existingItem
 			updatedItem.PR = freshPR // Update with fresh PR data
-			
+
 			// Reset loading states for data we want to refresh
 			if needsAIUpdate {
 				updatedItem.LoadingDiff = true
@@ -602,7 +605,7 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 				updatedItem.AIAnalysis = nil
 			}
 			// Reviews are already marked as loading from handleRefresh
-			
+
 			newItems = append(newItems, updatedItem)
 		} else {
 			// New PR - add with full loading state
@@ -618,13 +621,13 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 			newItems = append(newItems, newItem)
 		}
 	}
-	
+
 	// Update items list
 	m.items = newItems
-	
+
 	// Apply filter to update visible items
 	m = m.updateVisibleItems()
-	
+
 	// Update status with refresh results
 	statusParts := []string{fmt.Sprintf("Refreshed %d PRs", len(msg.PRs))}
 	if newPRCount > 0 {
@@ -633,34 +636,34 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 	if updatedPRCount > 0 {
 		statusParts = append(statusParts, fmt.Sprintf("%d updated", updatedPRCount))
 	}
-	
+
 	filterText := ""
 	if m.showOnlyUnreviewed {
 		filterText = " (unreviewed only)"
 	}
 	m.status = fmt.Sprintf("%s%s", strings.Join(statusParts, ", "), filterText)
-	
+
 	// Start loading data for new and updated PRs
 	cmds := []tea.Cmd{}
 	for i, item := range m.items {
 		pr := item.PR
 		prID := item.ID
 		delay := time.Duration(i*50) * time.Millisecond
-		
+
 		// Load diff stats if needed
 		if item.LoadingDiff {
 			cmds = append(cmds, tea.Tick(delay, func(t time.Time) tea.Msg {
 				return FetchDiffStatsCmd(m.github, pr, prID)()
 			}))
 		}
-		
-		// Load check status if needed  
+
+		// Load check status if needed
 		if item.LoadingChecks {
 			cmds = append(cmds, tea.Tick(delay+20*time.Millisecond, func(t time.Time) tea.Msg {
 				return FetchCheckStatusCmd(m.github, pr, prID)()
 			}))
 		}
-		
+
 		// Always refresh reviews (user might have reviewed)
 		if item.LoadingReviews {
 			cmds = append(cmds, tea.Tick(delay+40*time.Millisecond, func(t time.Time) tea.Msg {
@@ -668,7 +671,7 @@ func (m Model) handleSmartRefreshLoaded(msg SmartRefreshLoadedMsg) (Model, tea.C
 			}))
 		}
 	}
-	
+
 	return m, tea.Batch(cmds...)
 }
 
@@ -681,7 +684,7 @@ func (m Model) handlePRApproved(msg PRApprovedMsg) (Model, tea.Cmd) {
 
 	var approvedPR *PRItem
 	m = m.updatePRByID(msg.PRID, func(item *PRItem) {
-		approvedPR = item  // Capture for auto-merge logic
+		approvedPR = item // Capture for auto-merge logic
 		item.Approved = true
 		item.Reviewed = true
 	})
@@ -706,16 +709,46 @@ func (m Model) handlePRApproved(msg PRApprovedMsg) (Model, tea.Cmd) {
 
 func (m Model) handleAutoMergeEnabled(msg AutoMergeEnabledMsg) (Model, tea.Cmd) {
 	if msg.Err != nil {
+		// Check if this is the specific "no failing checks" error that means we should merge directly
+		errorMsg := msg.Err.Error()
+		if strings.Contains(errorMsg, "pull request has no failing checks to resolve") {
+			// GitHub says auto-merge isn't needed - the PR is ready for immediate merge
+			item := m.findPRByID(msg.PRID)
+			if item != nil {
+				slog.Info("Auto-merge not needed, falling back to direct merge", slog.Any("pr", item.PR))
+				m.status = fmt.Sprintf("PR #%d ready for immediate merge...", item.PR.Number)
+				return m, MergeCmd(item.PR, "SQUASH", item.ID)
+			}
+		}
+
+		// For any other auto-merge error, show the error to the user
 		slog.Error("Auto-merge enabling failed in UI", slog.Int64("prID", msg.PRID), slog.Any("error", msg.Err))
 		m.status = errorStyle.Render("Failed to enable auto-merge: " + msg.Err.Error())
+		return m, nil
+	}
+
+	// Auto-merge enabled successfully
+	item := m.findPRByID(msg.PRID)
+	if item != nil {
+		slog.Info("Auto-merge enabled successfully in UI", slog.Any("pr", item.PR))
+		m.status = successStyle.Render(fmt.Sprintf("🔄 Auto-merge enabled for PR #%d", item.PR.Number))
+	}
+
+	return m, nil
+}
+
+func (m Model) handlePRMerged(msg PRMergedMsg) (Model, tea.Cmd) {
+	if msg.Err != nil {
+		slog.Error("PR merging failed in UI", slog.Int64("prID", msg.PRID), slog.Any("error", msg.Err))
+		m.status = errorStyle.Render("Failed to merge PR: " + msg.Err.Error())
 		return m, nil
 	}
 
 	// Find the PR item for status update
 	item := m.findPRByID(msg.PRID)
 	if item != nil {
-		slog.Info("Auto-merge enabled successfully in UI", slog.Any("pr", item.PR))
-		m.status = successStyle.Render(fmt.Sprintf("🔄 Auto-merge enabled for PR #%d", item.PR.Number))
+		slog.Info("PR merged successfully in UI", slog.Any("pr", item.PR))
+		m.status = successStyle.Render(fmt.Sprintf("✅ Merged PR #%d", item.PR.Number))
 	}
 
 	return m, nil
@@ -742,7 +775,7 @@ func (m Model) handleApprove() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	slog.Info("User initiated PR approval", slog.Any("pr", prItem.PR), 
+	slog.Info("User initiated PR approval", slog.Any("pr", prItem.PR),
 		slog.Bool("reviewed", prItem.Reviewed), slog.Bool("approved", prItem.Approved))
 	m.status = fmt.Sprintf("Approving PR #%d...", prItem.PR.Number)
 	return m, ApprovePRCmd(prItem.PR, prItem.ID)
@@ -761,7 +794,7 @@ func (m Model) handleSkip() (Model, tea.Cmd) {
 		return m, nil
 	}
 
-	slog.Info("User skipped PR", slog.Any("pr", prItem.PR), 
+	slog.Info("User skipped PR", slog.Any("pr", prItem.PR),
 		slog.Bool("reviewed", prItem.Reviewed), slog.Bool("approved", prItem.Approved))
 	m.status = fmt.Sprintf("⏭️ Skipped PR #%d", prItem.PR.Number)
 	return m, m.moveToNext()
@@ -798,24 +831,19 @@ func (m Model) handleAutoMerge() (Model, tea.Cmd) {
 	}
 
 	slog.Info("User requested auto-merge", slog.Any("pr", prItem.PR))
-	
+
 	// Check auto-merge configuration
 	switch m.config.GitHub.AutoMergeOnApproval {
-	case "true":
-		// Auto-merge enabled - proceed directly
-		m.status = fmt.Sprintf("Enabling auto-merge for PR #%d...", prItem.PR.Number)
-		return m, EnableAutoMergeCmd(prItem.PR, "SQUASH", prItem.ID)
 	case "false":
 		// Auto-merge disabled
 		m.status = "Auto-merge is disabled in configuration"
 		return m, nil
-	case "ask":
-		// Ask user for confirmation (this is also the default)
-		// For now, proceed with auto-merge - later we can add a confirmation dialog 
+	case "true", "ask", "":
+		// Always try auto-merge first - GitHub will tell us if it's not needed
 		m.status = fmt.Sprintf("Enabling auto-merge for PR #%d...", prItem.PR.Number)
 		return m, EnableAutoMergeCmd(prItem.PR, "SQUASH", prItem.ID)
 	default:
-		// Default to ask behavior
+		// Default to auto-merge attempt
 		m.status = fmt.Sprintf("Enabling auto-merge for PR #%d...", prItem.PR.Number)
 		return m, EnableAutoMergeCmd(prItem.PR, "SQUASH", prItem.ID)
 	}
@@ -842,20 +870,20 @@ func (m Model) handleDetails() (Model, tea.Cmd) {
 }
 
 func (m Model) handleRefresh() (Model, tea.Cmd) {
-	slog.Info("User initiated refresh", slog.Int("current_items", len(m.items)), 
+	slog.Info("User initiated refresh", slog.Int("current_items", len(m.items)),
 		slog.Bool("show_only_unreviewed", m.showOnlyUnreviewed))
-		
+
 	m.loadingPRs = true
 	m.status = "Checking for updates..."
-	
+
 	// Mark all existing reviews as loading to re-check review status
 	for i := range m.items {
 		m.items[i].LoadingReviews = true
 	}
-	
+
 	// Re-apply filter to show loading state
 	m = m.updateVisibleItems()
-	
+
 	return m, tea.Batch(
 		m.spinner.Tick,
 		SmartRefreshCmd(m.github),
@@ -866,23 +894,23 @@ func (m Model) handleFilter() (Model, tea.Cmd) {
 	// Toggle filter state
 	oldFilter := m.showOnlyUnreviewed
 	m.showOnlyUnreviewed = !m.showOnlyUnreviewed
-	
-	slog.Debug("Filter toggled", slog.Bool("old_filter", oldFilter), slog.Bool("new_filter", m.showOnlyUnreviewed), 
+
+	slog.Debug("Filter toggled", slog.Bool("old_filter", oldFilter), slog.Bool("new_filter", m.showOnlyUnreviewed),
 		slog.Int("total_items", len(m.items)))
-	
+
 	// Update visible items based on new filter state (don't preserve selection for user-initiated filter)
 	m = m.updateVisibleItemsWithPreserveSelection(false)
-	
+
 	// Update status message
 	filterStatus := "all"
 	if m.showOnlyUnreviewed {
 		filterStatus = "unreviewed only"
 	}
 	m.status = fmt.Sprintf("Filter toggled: showing %s PRs", filterStatus)
-	
-	slog.Info("Filter applied", slog.String("filter_mode", filterStatus), 
+
+	slog.Info("Filter applied", slog.String("filter_mode", filterStatus),
 		slog.Int("visible_items", len(m.list.Items())), slog.Int("total_items", len(m.items)))
-	
+
 	return m, nil
 }
 
@@ -895,9 +923,9 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		slog.Debug("No items to filter", slog.Bool("preserve_selection", preserveSelection))
 		return m
 	}
-	
+
 	start := time.Now()
-	
+
 	// Get currently selected PR to prevent jarring disappearance (only during async updates)
 	currentSelection := m.list.SelectedItem()
 	var selectedPRNumber int
@@ -906,17 +934,17 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 			selectedPRNumber = prItem.PR.Number
 		}
 	}
-	
+
 	var visibleItems []list.Item
 	filteredCount := 0
 	reviewedCount := 0
 	approvedCount := 0
 	dismissedCount := 0
 	loadingCount := 0
-	
+
 	for _, item := range m.items {
 		shouldShow := false
-		
+
 		// Count review states for logging
 		if item.Reviewed {
 			reviewedCount++
@@ -930,30 +958,30 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		if item.LoadingReviews {
 			loadingCount++
 		}
-		
+
 		if m.showOnlyUnreviewed {
 			// Show PR if:
 			// - Not reviewed AND not approved yet, OR
 			// - Review was dismissed (needs re-review), OR
-			// - Review status is still being loaded, OR  
+			// - Review status is still being loaded, OR
 			// - It's the currently selected PR (prevent jarring disappearance)
-			shouldShow = (!item.Reviewed && !item.Approved) || item.Dismissed || item.LoadingReviews || 
-						 (selectedPRNumber > 0 && item.PR.Number == selectedPRNumber)
+			shouldShow = (!item.Reviewed && !item.Approved) || item.Dismissed || item.LoadingReviews ||
+				(selectedPRNumber > 0 && item.PR.Number == selectedPRNumber)
 		} else {
 			// Show all PRs
 			shouldShow = true
 		}
-		
+
 		if shouldShow {
 			visibleItems = append(visibleItems, item)
 		} else {
 			filteredCount++
 		}
 	}
-	
+
 	duration := time.Since(start)
-	
-	slog.Debug("Updated visible items", 
+
+	slog.Debug("Updated visible items",
 		slog.Bool("preserve_selection", preserveSelection),
 		slog.Bool("show_only_unreviewed", m.showOnlyUnreviewed),
 		slog.Int("selected_pr", selectedPRNumber),
@@ -965,10 +993,10 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		slog.Int("dismissed_count", dismissedCount),
 		slog.Int("loading_count", loadingCount),
 		slog.Duration("duration", duration))
-	
+
 	// Update the list with filtered items
 	m.list.SetItems(visibleItems)
-	
+
 	return m
 }
 
@@ -987,12 +1015,12 @@ func (m Model) triggerAIAnalysisIfReady(itemIndex int) tea.Cmd {
 		slog.Debug("AI agent is nil", slog.Int("itemIndex", itemIndex))
 		return nil
 	}
-	
+
 	item := &m.items[itemIndex]
-	
+
 	slog.Debug("Checking AI analysis conditions", slog.Any("pr", item.PR),
 		slog.Bool("LoadingDiff", item.LoadingDiff),
-		slog.Bool("LoadingChecks", item.LoadingChecks), 
+		slog.Bool("LoadingChecks", item.LoadingChecks),
 		slog.Bool("LoadingReviews", item.LoadingReviews),
 		slog.Bool("LoadingAI", item.LoadingAI),
 		slog.Bool("HasDiffStats", item.DiffStats != nil),
@@ -1002,17 +1030,17 @@ func (m Model) triggerAIAnalysisIfReady(itemIndex int) tea.Cmd {
 		slog.Bool("HasCheckError", item.CheckError != nil),
 		slog.Bool("HasReviewError", item.ReviewError != nil),
 		slog.String("HeadSHA", item.PR.HeadSHA))
-	
+
 	// Check if we have all required data and haven't started AI analysis yet
-	if !item.LoadingDiff && !item.LoadingChecks && !item.LoadingReviews && 
-	   item.LoadingAI && item.DiffStats != nil && item.CheckStatus != nil && 
-	   item.Reviews != nil && item.DiffError == nil && item.CheckError == nil && item.ReviewError == nil &&
-	   item.PR.HeadSHA != "" {
-		
+	if !item.LoadingDiff && !item.LoadingChecks && !item.LoadingReviews &&
+		item.LoadingAI && item.DiffStats != nil && item.CheckStatus != nil &&
+		item.Reviews != nil && item.DiffError == nil && item.CheckError == nil && item.ReviewError == nil &&
+		item.PR.HeadSHA != "" {
+
 		slog.Debug("All conditions met, triggering AI analysis", slog.Any("pr", item.PR))
 		return FetchAIAnalysisCmd(m.aiAgent, item.PR, item.DiffStats, item.CheckStatus, item.Reviews, item.ID)
 	}
-	
+
 	slog.Debug("AI analysis conditions not met", slog.Any("pr", item.PR))
 	return nil
 }
@@ -1020,16 +1048,16 @@ func (m Model) triggerAIAnalysisIfReady(itemIndex int) tea.Cmd {
 // generateDetailContent creates detailed content for a PR popup
 func (m Model) generateDetailContent(item PRItem) string {
 	var content strings.Builder
-	
+
 	// Header
 	content.WriteString(fmt.Sprintf("# %s\n\n", item.PR.Title))
 	content.WriteString(fmt.Sprintf("**Repository:** %s/%s\n", item.PR.Owner, item.PR.Repo))
 	content.WriteString(fmt.Sprintf("**PR Number:** #%d\n", item.PR.Number))
-	
+
 	if !item.PR.UpdatedAt.IsZero() {
 		content.WriteString(fmt.Sprintf("**Updated:** %s\n", item.PR.UpdatedAt.Format("Jan 2, 2006 at 3:04 PM")))
 	}
-	
+
 	if item.PR.HeadSHA != "" {
 		sha := item.PR.HeadSHA
 		if len(sha) > 8 {
@@ -1037,9 +1065,9 @@ func (m Model) generateDetailContent(item PRItem) string {
 		}
 		content.WriteString(fmt.Sprintf("**Head SHA:** `%s`\n", sha))
 	}
-	
+
 	content.WriteString("\n---\n\n")
-	
+
 	// Diff Stats
 	if item.DiffStats != nil {
 		content.WriteString("## 📊 Changes\n\n")
@@ -1050,7 +1078,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 	} else if item.LoadingDiff {
 		content.WriteString("## 📊 Changes\n\n*Loading diff statistics...*\n\n")
 	}
-	
+
 	// Check Status
 	if item.CheckStatus != nil {
 		content.WriteString("## ✅ Checks\n\n")
@@ -1058,7 +1086,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 		if item.CheckStatus.Description != "" {
 			content.WriteString(fmt.Sprintf("**Description:** %s\n", item.CheckStatus.Description))
 		}
-		
+
 		if len(item.CheckStatus.Details) > 0 {
 			content.WriteString("\n**Details:**\n")
 			for _, detail := range item.CheckStatus.Details {
@@ -1078,7 +1106,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 	} else if item.LoadingChecks {
 		content.WriteString("## ✅ Checks\n\n*Loading check status...*\n\n")
 	}
-	
+
 	// Reviews
 	if item.Reviews != nil {
 		content.WriteString("## 👥 Reviews\n\n")
@@ -1087,7 +1115,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 		} else {
 			userReviewed := false
 			userApproved := false
-			
+
 			for _, review := range item.Reviews {
 				status := "💬"
 				switch review.State {
@@ -1098,9 +1126,9 @@ func (m Model) generateDetailContent(item PRItem) string {
 				case "COMMENTED":
 					status = "💬"
 				}
-				
+
 				content.WriteString(fmt.Sprintf("- %s %s: %s\n", status, review.User, review.State))
-				
+
 				if review.User == m.username {
 					userReviewed = true
 					if review.State == "APPROVED" {
@@ -1108,7 +1136,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 					}
 				}
 			}
-			
+
 			content.WriteString(fmt.Sprintf("\n**Your Status:** "))
 			if userApproved {
 				content.WriteString("✅ Approved")
@@ -1122,7 +1150,7 @@ func (m Model) generateDetailContent(item PRItem) string {
 	} else if item.LoadingReviews {
 		content.WriteString("## 👥 Reviews\n\n*Loading reviews...*\n\n")
 	}
-	
+
 	// AI Analysis
 	if item.AIAnalysis != nil {
 		content.WriteString("## 🤖 AI Analysis\n\n")
@@ -1137,11 +1165,11 @@ func (m Model) generateDetailContent(item PRItem) string {
 	} else if m.aiAgent != nil {
 		content.WriteString("## 🤖 AI Analysis\n\n*AI analysis will run when all data is loaded*\n\n")
 	}
-	
+
 	// Footer
 	content.WriteString("---\n\n")
 	content.WriteString("*Press **Enter** or **Esc** to close*")
-	
+
 	return content.String()
 }
 
@@ -1150,28 +1178,28 @@ func (m Model) renderPopup(baseView string) string {
 	// Get terminal dimensions from the list widget
 	width := m.list.Width()
 	height := m.list.Height() + 4 // Account for status and help
-	
-	// Define popup dimensions (80% of screen to leave more background visible)  
+
+	// Define popup dimensions (80% of screen to leave more background visible)
 	popupWidth := min(width*8/10, 100)
 	popupHeight := min(height*8/10, 35)
-	
+
 	// Format content and handle scrolling
 	formattedContent := m.formatPopupContent(m.popupContent, popupWidth-6)
 	contentLines := strings.Split(formattedContent, "\n")
-	
+
 	// Calculate visible area (reserve space for border and padding)
 	visibleHeight := popupHeight - 4 // Account for border (2) + padding (2)
-	
+
 	// Ensure scroll position is within bounds
 	maxScroll := max(0, len(contentLines)-visibleHeight)
 	scrollPos := min(m.popupScrollPos, maxScroll)
-	
+
 	// Extract visible content
 	var visibleLines []string
 	if len(contentLines) > visibleHeight {
 		end := min(scrollPos+visibleHeight, len(contentLines))
 		visibleLines = contentLines[scrollPos:end]
-		
+
 		// Add scroll indicators
 		if scrollPos > 0 {
 			// Replace first line with scroll up indicator
@@ -1188,9 +1216,9 @@ func (m Model) renderPopup(baseView string) string {
 	} else {
 		visibleLines = contentLines
 	}
-	
+
 	content := strings.Join(visibleLines, "\n")
-	
+
 	// Create popup border style with semi-transparent background
 	borderStyle := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
@@ -1199,9 +1227,9 @@ func (m Model) renderPopup(baseView string) string {
 		Foreground(lipgloss.Color("255")). // Bright white text
 		Padding(1).
 		Width(popupWidth - 4) // Account for border and padding
-	
+
 	popup := borderStyle.Render(content)
-	
+
 	// Simple, clean popup overlay using lipgloss.Place()
 	return lipgloss.Place(width, height, lipgloss.Center, lipgloss.Center, popup)
 }
@@ -1210,7 +1238,7 @@ func (m Model) renderPopup(baseView string) string {
 func (m Model) formatPopupContent(content string, maxWidth int) string {
 	lines := strings.Split(content, "\n")
 	var formatted strings.Builder
-	
+
 	for _, line := range lines {
 		// Handle headers
 		if strings.HasPrefix(line, "# ") {
@@ -1258,7 +1286,7 @@ func (m Model) formatPopupContent(content string, maxWidth int) string {
 		}
 		formatted.WriteString("\n")
 	}
-	
+
 	return formatted.String()
 }
 

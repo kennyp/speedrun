@@ -153,12 +153,12 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	if pr.client == nil {
 		return nil, fmt.Errorf("PR client is nil")
 	}
-	
+
 	slog.Debug("Getting PR reviews", slog.Any("pr", pr))
 	start := time.Now()
-	
+
 	cacheKey := pr.reviewsCacheKey()
-	
+
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedReviews []*Review
@@ -187,7 +187,7 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		slog.Error("GitHub API get reviews failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get reviews: %w", err)
@@ -232,12 +232,12 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	if pr.client == nil {
 		return nil, fmt.Errorf("PR client is nil")
 	}
-	
+
 	slog.Debug("Getting PR check status", slog.Any("pr", pr))
 	start := time.Now()
-	
+
 	cacheKey := pr.checkStatusCacheKey()
-	
+
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedStatus *CheckStatus
@@ -246,7 +246,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 			if cachedStatus != nil && cachedStatus.State != "" && cachedStatus.Description != "" {
 				duration := time.Since(start)
 				slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
-				
+
 				// If HeadSHA is not populated, we still need to fetch PR details to get it
 				if pr.HeadSHA == "" {
 					slog.Debug("HeadSHA not available, fetching PR details", slog.Any("pr", pr))
@@ -265,7 +265,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 						slog.Debug("Failed to get PR details for HeadSHA", slog.Any("pr", pr), slog.Any("error", err))
 					}
 				}
-				
+
 				return cachedStatus, nil
 			} else {
 				// Bad cached data (nil or invalid state/description) - delete it and fetch fresh
@@ -298,7 +298,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	// Get both check runs (modern) and statuses (legacy)
 	var checkRuns *github.ListCheckRunsResults
 	var statuses *github.CombinedStatus
-	
+
 	// Get check runs with retry
 	checkOperation := func() error {
 		var checkErr error
@@ -306,7 +306,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 		return checkErr
 	}
 	backoff.Retry(checkOperation, backoff.WithContext(pr.client.backoffConfig.ToExponentialBackoff(), ctx))
-	
+
 	// Get statuses with retry
 	statusOperation := func() error {
 		var statusErr error
@@ -347,7 +347,7 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 
 	// Apply check filtering based on configuration
 	filteredDetails := pr.client.filterChecks(status.Details)
-	
+
 	// Determine overall status
 	status.State = aggregateCheckStates(filteredDetails)
 	status.Description = formatCheckDescription(filteredDetails)
@@ -368,12 +368,12 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	if pr.client == nil {
 		return nil, fmt.Errorf("PR client is nil")
 	}
-	
+
 	slog.Debug("Getting PR diff stats", slog.Any("pr", pr))
 	start := time.Now()
-	
+
 	cacheKey := pr.diffStatsCacheKey()
-	
+
 	// Try to get from cache first
 	if pr.client.cache != nil {
 		var cachedStats *DiffStats
@@ -402,7 +402,7 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
 	err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx))
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		slog.Error("GitHub API get diff stats failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return nil, fmt.Errorf("failed to get PR details: %w", err)
@@ -429,7 +429,7 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 func (pr *PullRequest) Approve(ctx context.Context) error {
 	slog.Debug("Approving PR", slog.Any("pr", pr))
 	start := time.Now()
-	
+
 	review := &github.PullRequestReviewRequest{
 		Event: github.String("APPROVE"),
 		Body:  github.String("LGTM"),
@@ -437,7 +437,7 @@ func (pr *PullRequest) Approve(ctx context.Context) error {
 
 	_, _, err := pr.client.client.PullRequests.CreateReview(ctx, pr.Owner, pr.Repo, pr.Number, review)
 	duration := time.Since(start)
-	
+
 	if err != nil {
 		slog.Error("GitHub API approve PR failed", slog.Any("pr", pr), slog.Duration("duration", duration), slog.Any("error", err))
 		return fmt.Errorf("failed to approve PR: %w", err)
@@ -531,6 +531,13 @@ func formatCheckDescription(details []CheckDetail) string {
 // EnableAutoMerge enables auto-merge for this pull request
 func (pr *PullRequest) EnableAutoMerge(ctx context.Context, mergeMethod string) error {
 	slog.Debug("Enabling auto-merge for PR", slog.Any("pr", pr), slog.String("merge_method", mergeMethod))
-	
+
 	return pr.client.EnableAutoMerge(ctx, pr.Owner, pr.Repo, pr.Number, mergeMethod)
+}
+
+// Merge merges this pull request immediately
+func (pr *PullRequest) Merge(ctx context.Context, mergeMethod string) error {
+	slog.Debug("Merging PR", slog.Any("pr", pr), slog.String("merge_method", mergeMethod))
+
+	return pr.client.Merge(ctx, pr.Owner, pr.Repo, pr.Number, mergeMethod)
 }

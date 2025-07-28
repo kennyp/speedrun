@@ -6,11 +6,22 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/BurntSushi/toml"
-	altsrc "github.com/urfave/cli-altsrc/v3"
 	"github.com/kennyp/speedrun/pkg/op"
+	altsrc "github.com/urfave/cli-altsrc/v3"
 )
+
+// 1Password processing cache to avoid repeated processing during CLI flag parsing
+var (
+	opProcessingCache      map[string]string // maps raw TOML content -> processed content
+	opProcessingCacheMutex sync.RWMutex
+)
+
+func init() {
+	opProcessingCache = make(map[string]string)
+}
 
 // OpTOMLValueSource creates a value source that processes 1Password references
 // before parsing TOML. It checks environment variables for 1Password settings
@@ -25,21 +36,37 @@ func opTOMLUnmarshal(data []byte, v any) error {
 	// This avoids circular dependency with CLI flags
 	opEnabled := getOpEnabledFromEnv()
 	opAccount := getOpAccountFromEnv()
-	
+
 	if opEnabled {
+		rawContent := string(data)
+
+		// Check cache first to avoid repeated 1Password processing
+		opProcessingCacheMutex.RLock()
+		if cachedContent, exists := opProcessingCache[rawContent]; exists {
+			opProcessingCacheMutex.RUnlock()
+			return toml.Unmarshal([]byte(cachedContent), v)
+		}
+		opProcessingCacheMutex.RUnlock()
+
 		slog.Debug("1Password integration enabled, processing TOML file", "account", opAccount)
-		
+
 		// Process 1Password references in the raw TOML data
-		processedData, err := processOpReferences(string(data), opAccount)
+		processedData, err := processOpReferences(rawContent, opAccount)
 		if err != nil {
 			slog.Error("Failed to process 1Password references", "error", err)
 			// Fall back to original data if op processing fails
 			return toml.Unmarshal(data, v)
 		}
+
+		// Cache the processed result
+		opProcessingCacheMutex.Lock()
+		opProcessingCache[rawContent] = processedData
+		opProcessingCacheMutex.Unlock()
+
 		data = []byte(processedData)
 		slog.Debug("Successfully processed 1Password references in TOML")
 	}
-	
+
 	return toml.Unmarshal(data, v)
 }
 
@@ -55,7 +82,7 @@ func getOpEnabledFromEnv() bool {
 		}
 		return !disabled // If disabled=true, return false (not enabled)
 	}
-	
+
 	// Default to enabled if SPEEDRUN_OP_DISABLE is not set
 	return true
 }
@@ -66,7 +93,7 @@ func getOpAccountFromEnv() string {
 	if account := os.Getenv("SPEEDRUN_OP_ACCOUNT"); account != "" {
 		return account
 	}
-	
+
 	// Fall back to standard 1Password env var
 	return os.Getenv("OP_ACCOUNT")
 }
@@ -77,27 +104,27 @@ func processOpReferences(tomlContent, account string) (string, error) {
 	if !strings.Contains(tomlContent, "op://") {
 		return tomlContent, nil
 	}
-	
+
 	ctx := context.Background()
 	opClient := op.New(account)
-	
+
 	// Check if op CLI is available
 	if !opClient.Available() {
 		slog.Warn("1Password CLI (op) is not available, skipping op:// processing")
 		return tomlContent, nil
 	}
-	
+
 	// Sign in to 1Password
 	if err := opClient.SignIn(ctx); err != nil {
 		slog.Warn("Failed to sign in to 1Password, skipping op:// processing", "error", err)
 		return tomlContent, nil
 	}
-	
+
 	// Inject all op:// references at once
 	resolved, err := opClient.Inject(ctx, tomlContent)
 	if err != nil {
 		return "", err
 	}
-	
+
 	return resolved, nil
 }

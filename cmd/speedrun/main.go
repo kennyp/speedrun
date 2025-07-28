@@ -12,12 +12,12 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	gap "github.com/muesli/go-app-paths"
 	"github.com/kennyp/speedrun/internal/ui"
 	"github.com/kennyp/speedrun/pkg/agent"
 	"github.com/kennyp/speedrun/pkg/cache"
 	"github.com/kennyp/speedrun/pkg/config"
 	"github.com/kennyp/speedrun/pkg/github"
+	gap "github.com/muesli/go-app-paths"
 	"github.com/urfave/cli-altsrc/v3"
 	"github.com/urfave/cli/v3"
 )
@@ -30,24 +30,23 @@ func main() {
 
 	// Create vendor-scoped paths using go-app-paths
 	scope := gap.NewVendorScope(gap.User, "kennyp", "speedrun")
-	
+
 	configPath, err := scope.ConfigPath("config.toml")
 	if err != nil {
 		log.Fatalf("cannot get config path: %v", err)
 	}
-	
+
 	cachePath, err := scope.DataPath("cache.db")
 	if err != nil {
 		log.Fatalf("cannot get cache path: %v", err)
 	}
-	
+
 	logPath, err := scope.LogPath("speedrun.log")
 	if err != nil {
 		log.Fatalf("cannot get log path: %v", err)
 	}
 
 	configFile := altsrc.StringSourcer(configPath)
-
 	app := cli.Command{
 		Name:        "speedrun",
 		Usage:       "AI-powered PR review tool for on-call engineers",
@@ -145,7 +144,6 @@ func main() {
 				),
 			},
 
-
 			// Cache settings
 			&cli.StringFlag{
 				Name:     "cache-path",
@@ -238,7 +236,7 @@ func maskToken(token string) string {
 func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	// Load configuration from CLI first to get cache path for default log path
 	cfg := config.LoadFromCLI(cmd)
-	
+
 	// Set up logging
 	var level slog.Level
 	switch cfg.Log.Level {
@@ -253,11 +251,11 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 	default:
 		level = slog.LevelInfo
 	}
-	
+
 	// Determine log output using Unix conventions
 	var logWriter *os.File
 	var err error
-	
+
 	switch cfg.Log.Path {
 	case "", "default":
 		// Use default log path when unset
@@ -284,11 +282,11 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 			return fmt.Errorf("failed to open log file %s: %w", cfg.Log.Path, err)
 		}
 	}
-	
+
 	handler := slog.NewTextHandler(logWriter, &slog.HandlerOptions{Level: level})
 	logger := slog.New(handler)
 	slog.SetDefault(logger)
-	
+
 	slog.Debug("Starting speedrun", "log_level", cfg.Log.Level, "log_path", cfg.Log.Path)
 
 	// Note: 1Password references are now resolved automatically during config parsing
@@ -402,7 +400,7 @@ func initConfig(ctx context.Context, cmd *cli.Command) error {
 		}
 		fmt.Printf("Created default config at %s\n", configPath)
 	}
-	
+
 	// Open in editor if --edit flag is provided
 	if cmd.Bool("edit") {
 		editor := os.Getenv("EDITOR")
@@ -415,19 +413,19 @@ func initConfig(ctx context.Context, cmd *cli.Command) error {
 				}
 			}
 		}
-		
+
 		if editor == "" {
 			fmt.Println("No suitable editor found. Please set the $EDITOR environment variable.")
 			fmt.Println("Please edit the config file to add your GitHub token and AI API key.")
 			return nil
 		}
-		
+
 		fmt.Printf("Opening config in %s...\n", editor)
 		cmd := exec.Command(editor, configPath)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
-		
+
 		if err := cmd.Run(); err != nil {
 			fmt.Printf("Failed to open editor: %v\n", err)
 			if !configExists {
@@ -437,6 +435,6 @@ func initConfig(ctx context.Context, cmd *cli.Command) error {
 	} else if !configExists {
 		fmt.Println("Please edit the config file to add your GitHub token and AI API key.")
 	}
-	
+
 	return nil
 }
