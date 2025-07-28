@@ -584,7 +584,7 @@ func runSpeedrun(ctx context.Context, cmd *cli.Command) error {
 		slog.Debug("Creating AI agent", "model", cfg.AI.Model, "base_url", cfg.AI.BaseURL)
 		
 		// Create tool registry for agent
-		toolRegistry := agent.NewToolRegistry(githubClient)
+		toolRegistry := agent.NewToolRegistry(githubClient, cacheInstance)
 		
 		aiAgent = agent.NewAgent(cfg.AI.BaseURL, cfg.AI.APIKey, cfg.AI.Model, cfg.AI.Backoff, toolRegistry, cfg.AI.ToolTimeout)
 		fmt.Printf("🤖 AI analysis enabled with model: %s\n", cfg.AI.Model)

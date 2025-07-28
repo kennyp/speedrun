@@ -2,12 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"strings"
 
+	"github.com/kennyp/speedrun/pkg/cache"
 	"github.com/kennyp/speedrun/pkg/github" 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/packages/param"
@@ -25,19 +27,21 @@ type Tool interface {
 type ToolRegistry struct {
 	tools   map[string]Tool
 	client  *github.Client
+	cache   cache.Cache
 }
 
 // NewToolRegistry creates a new tool registry
-func NewToolRegistry(githubClient *github.Client) *ToolRegistry {
+func NewToolRegistry(githubClient *github.Client, cache cache.Cache) *ToolRegistry {
 	registry := &ToolRegistry{
 		tools:  make(map[string]Tool),
 		client: githubClient,
+		cache:  cache,
 	}
 
 	// Register all tools
-	registry.Register(&GitHubTool{client: githubClient})
-	registry.Register(&WebFetchTool{})
-	registry.Register(&DiffAnalyzerTool{})
+	registry.Register(&GitHubTool{client: githubClient, cache: cache})
+	registry.Register(&WebFetchTool{cache: cache})
+	registry.Register(&DiffAnalyzerTool{cache: cache})
 
 	return registry
 }
@@ -76,6 +80,7 @@ func (r *ToolRegistry) GetOpenAITools() []openai.ChatCompletionToolParam {
 // GitHubTool provides GitHub API access
 type GitHubTool struct {
 	client *github.Client
+	cache  cache.Cache
 }
 
 func (t *GitHubTool) Name() string {
@@ -138,29 +143,66 @@ func (t *GitHubTool) Execute(ctx context.Context, params json.RawMessage) (strin
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
 
+	// Generate cache key based on tool name and parameters
+	cacheKey := t.generateCacheKey(params)
+	
+	// Try to get from cache first
+	var result string
+	if err := t.cache.Get(cacheKey, &result); err == nil {
+		return result, nil
+	}
+
+	// Cache miss, execute the operation
 	switch p.Action {
 	case "get_pr_details":
-		return t.client.GetPRDetails(ctx, p.Owner, p.Repo, p.PRNumber)
+		result, err := t.client.GetPRDetails(ctx, p.Owner, p.Repo, p.PRNumber)
+		if err != nil {
+			return "", err
+		}
+		t.cache.Set(cacheKey, result)
+		return result, nil
 		
 	case "get_pr_diff":
-		return t.client.GetPRDiff(ctx, p.Owner, p.Repo, p.PRNumber)
+		result, err := t.client.GetPRDiff(ctx, p.Owner, p.Repo, p.PRNumber)
+		if err != nil {
+			return "", err
+		}
+		t.cache.Set(cacheKey, result)
+		return result, nil
 		
 	case "get_file_content":
 		if p.Path == "" {
 			return "", fmt.Errorf("path parameter is required for get_file_content")
 		}
-		return t.client.GetFileContent(ctx, p.Owner, p.Repo, p.Path, p.Ref)
+		result, err := t.client.GetFileContent(ctx, p.Owner, p.Repo, p.Path, p.Ref)
+		if err != nil {
+			return "", err
+		}
+		t.cache.Set(cacheKey, result)
+		return result, nil
 		
 	case "get_pr_comments":
-		return t.client.GetPRComments(ctx, p.Owner, p.Repo, p.PRNumber)
+		result, err := t.client.GetPRComments(ctx, p.Owner, p.Repo, p.PRNumber)
+		if err != nil {
+			return "", err
+		}
+		t.cache.Set(cacheKey, result)
+		return result, nil
 		
 	default:
 		return "", fmt.Errorf("unknown action: %s", p.Action)
 	}
 }
 
+func (t *GitHubTool) generateCacheKey(params json.RawMessage) string {
+	hash := sha256.Sum256([]byte(fmt.Sprintf("github_api:%s", string(params))))
+	return fmt.Sprintf("tool:github:%x", hash)
+}
+
 // WebFetchTool fetches content from URLs
-type WebFetchTool struct{}
+type WebFetchTool struct{
+	cache cache.Cache
+}
 
 func (t *WebFetchTool) Name() string {
 	return "web_fetch"
@@ -196,6 +238,16 @@ func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (str
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
 
+	// Generate cache key based on tool name and parameters
+	cacheKey := t.generateCacheKey(params)
+	
+	// Try to get from cache first
+	var result string
+	if err := t.cache.Get(cacheKey, &result); err == nil {
+		return result, nil
+	}
+
+	// Cache miss, fetch from URL
 	// Create a request with context
 	req, err := http.NewRequestWithContext(ctx, "GET", p.URL, nil)
 	if err != nil {
@@ -210,6 +262,11 @@ func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (str
 	}
 	defer resp.Body.Close()
 
+	// Check for HTTP errors (don't cache error responses)
+	if resp.StatusCode >= 400 {
+		return "", fmt.Errorf("HTTP error %d: %s", resp.StatusCode, resp.Status)
+	}
+
 	// Read the response
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -222,11 +279,21 @@ func (t *WebFetchTool) Execute(ctx context.Context, params json.RawMessage) (str
 		content = content[:5000] + "\n... (truncated)"
 	}
 
+	// Cache the successful result
+	t.cache.Set(cacheKey, content)
+	
 	return content, nil
 }
 
+func (t *WebFetchTool) generateCacheKey(params json.RawMessage) string {
+	hash := sha256.Sum256([]byte(fmt.Sprintf("web_fetch:%s", string(params))))
+	return fmt.Sprintf("tool:web:%x", hash)
+}
+
 // DiffAnalyzerTool analyzes diffs for sensitive changes
-type DiffAnalyzerTool struct{}
+type DiffAnalyzerTool struct{
+	cache cache.Cache
+}
 
 func (t *DiffAnalyzerTool) Name() string {
 	return "diff_analyzer"
@@ -268,16 +335,37 @@ func (t *DiffAnalyzerTool) Execute(ctx context.Context, params json.RawMessage) 
 		return "", fmt.Errorf("invalid parameters: %w", err)
 	}
 
+	// Generate cache key based on tool name and parameters
+	cacheKey := t.generateCacheKey(params)
+	
+	// Try to get from cache first
+	var result string
+	if err := t.cache.Get(cacheKey, &result); err == nil {
+		return result, nil
+	}
+
+	// Cache miss, perform analysis
+	var analysisResult string
 	switch p.AnalysisType {
 	case "sensitive_files":
-		return t.analyzeSensitiveFiles(p.Diff), nil
+		analysisResult = t.analyzeSensitiveFiles(p.Diff)
 		
 	case "modified_paths":
-		return t.getModifiedPaths(p.Diff), nil
+		analysisResult = t.getModifiedPaths(p.Diff)
 		
 	default:
 		return "", fmt.Errorf("unknown analysis type: %s", p.AnalysisType)
 	}
+
+	// Cache the successful result
+	t.cache.Set(cacheKey, analysisResult)
+	
+	return analysisResult, nil
+}
+
+func (t *DiffAnalyzerTool) generateCacheKey(params json.RawMessage) string {
+	hash := sha256.Sum256([]byte(fmt.Sprintf("diff_analyzer:%s", string(params))))
+	return fmt.Sprintf("tool:diff:%x", hash)
 }
 
 func (t *DiffAnalyzerTool) analyzeSensitiveFiles(diff string) string {
