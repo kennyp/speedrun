@@ -1,0 +1,160 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            suffix: linux-amd64
+          - goos: linux
+            goarch: arm64
+            suffix: linux-arm64
+          - goos: darwin
+            goarch: amd64
+            suffix: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            suffix: darwin-arm64
+          - goos: windows
+            goarch: amd64
+            suffix: windows-amd64.exe
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Set up Go
+      uses: actions/setup-go@v5
+      with:
+        go-version: '1.24'
+
+    - name: Get version from tag
+      id: version
+      run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build binary
+      env:
+        GOOS: ${{ matrix.goos }}
+        GOARCH: ${{ matrix.goarch }}
+        CGO_ENABLED: 0
+      run: |
+        go build \
+          -ldflags "-X github.com/kennyp/speedrun/pkg/version.Version=${{ steps.version.outputs.VERSION }}" \
+          -o speedrun-${{ matrix.suffix }} \
+          ./cmd/speedrun
+
+    - name: Upload binary as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: speedrun-${{ matrix.suffix }}
+        path: speedrun-${{ matrix.suffix }}
+        retention-days: 1
+
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      contents: write
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: ./artifacts
+
+    - name: Prepare release files
+      run: |
+        mkdir -p ./release
+        find ./artifacts -name "speedrun-*" -type f -exec cp {} ./release/ \;
+        ls -la ./release/
+
+    - name: Generate release notes
+      id: release_notes
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/}
+        echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+        
+        # Get previous tag for changelog
+        PREV_TAG=$(git describe --tags --abbrev=0 $VERSION^ 2>/dev/null || echo "")
+        
+        if [ -n "$PREV_TAG" ]; then
+          echo "CHANGELOG<<EOF" >> $GITHUB_OUTPUT
+          echo "## What's Changed" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          git log --pretty=format:"- %s" $PREV_TAG..$VERSION >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+        else
+          echo "CHANGELOG=Initial release" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v2
+      with:
+        tag_name: ${{ steps.release_notes.outputs.VERSION }}
+        name: Release ${{ steps.release_notes.outputs.VERSION }}
+        body: |
+          # speedrun ${{ steps.release_notes.outputs.VERSION }}
+          
+          Swiss Army knife for on-call engineers - now with enhanced filtering and workflow automation.
+          
+          ${{ steps.release_notes.outputs.CHANGELOG }}
+          
+          ## Installation
+          
+          Download the appropriate binary for your platform:
+          
+          ### Linux
+          ```bash
+          curl -L https://github.com/kennyp/speedrun/releases/download/${{ steps.release_notes.outputs.VERSION }}/speedrun-linux-amd64 -o speedrun
+          chmod +x speedrun
+          ```
+          
+          ### macOS
+          ```bash
+          # Intel Macs
+          curl -L https://github.com/kennyp/speedrun/releases/download/${{ steps.release_notes.outputs.VERSION }}/speedrun-darwin-amd64 -o speedrun
+          chmod +x speedrun
+          
+          # Apple Silicon Macs
+          curl -L https://github.com/kennyp/speedrun/releases/download/${{ steps.release_notes.outputs.VERSION }}/speedrun-darwin-arm64 -o speedrun
+          chmod +x speedrun
+          ```
+          
+          ### Windows
+          Download the `speedrun-windows-amd64.exe` file and run it directly.
+          
+          ## Getting Started
+          
+          1. Run `speedrun init --edit` to create your configuration
+          2. Add your GitHub token and configure your search query
+          3. Optionally enable AI analysis with your API key
+          4. Run `speedrun` to start the TUI
+          
+          See the [README](https://github.com/kennyp/speedrun/blob/main/README.md) for detailed configuration and usage instructions.
+        files: |
+          ./release/speedrun-linux-amd64
+          ./release/speedrun-linux-arm64
+          ./release/speedrun-darwin-amd64
+          ./release/speedrun-darwin-arm64
+          ./release/speedrun-windows-amd64.exe
+        draft: false
+        prerelease: false
+        make_latest: true

@@ -50,7 +50,7 @@ func main() {
 	configFile := altsrc.StringSourcer(configPath)
 	app := cli.Command{
 		Name:        "speedrun",
-		Usage:       "AI-powered PR review tool for on-call engineers",
+		Usage:       "Swiss Army knife for on-call engineers",
 		Description: "All string configuration values support 1Password references (op://vault/item/field).\n\n1Password settings are controlled via environment variables:\n  SPEEDRUN_OP_DISABLE - disable 1Password integration (any truthy value)\n  SPEEDRUN_OP_ACCOUNT or OP_ACCOUNT - specify 1Password account",
 		Version:     version.Get(),
 		Authors:     []any{"Kenny Parnell <k.parnell@gmail.com>"},
