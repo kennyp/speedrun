@@ -39,6 +39,8 @@ type Analysis struct {
 	Recommendation Recommendation
 	Reasoning      string
 	RiskLevel      string
+	PRType         string // DOCUMENTATION/CODE/DEPENDENCY/MIXED
+	DocType        string // GENERAL/RFC/DECISION_RECORD/API_DOCS (only for DOCUMENTATION type)
 }
 
 // Implement AIAnalysis interface
@@ -52,6 +54,14 @@ func (a *Analysis) GetReasoning() string {
 
 func (a *Analysis) GetRiskLevel() string {
 	return a.RiskLevel
+}
+
+func (a *Analysis) GetPRType() string {
+	return a.PRType
+}
+
+func (a *Analysis) GetDocType() string {
+	return a.DocType
 }
 
 // Agent wraps the OpenAI client for PR analysis
@@ -222,16 +232,20 @@ func (a *Agent) executeToolCall(ctx context.Context, toolCall openai.ChatComplet
 
 // PRData represents the data about a PR for analysis
 type PRData struct {
-	Title         string
-	Number        int
-	Additions     int
-	Deletions     int
-	ChangedFiles  int
-	CIStatus      string // Deprecated: Use CheckDetails instead
-	CheckDetails  []CheckInfo
-	Reviews       []ReviewInfo
-	HasConflicts  bool
-	PRURL         string
+	Title              string
+	Number             int
+	Author             string
+	Labels             []string
+	RequestedReviewers []string
+	Description        string
+	Additions          int
+	Deletions          int
+	ChangedFiles       int
+	CIStatus           string // Deprecated: Use CheckDetails instead
+	CheckDetails       []CheckInfo
+	Reviews            []ReviewInfo
+	HasConflicts       bool
+	PRURL              string
 }
 
 // CheckInfo represents information about a CI check
@@ -287,6 +301,10 @@ func (a *Agent) parseResponse(content string) *Analysis {
 			analysis.RiskLevel = strings.TrimSpace(after)
 		} else if after, ok := strings.CutPrefix(line, "REASONING:"); ok {
 			analysis.Reasoning = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "PR_TYPE:"); ok {
+			analysis.PRType = strings.TrimSpace(after)
+		} else if after, ok := strings.CutPrefix(line, "DOC_TYPE:"); ok {
+			analysis.DocType = strings.TrimSpace(after)
 		}
 	}
 

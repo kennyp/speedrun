@@ -47,7 +47,7 @@ type OpValueSource struct {
 // strings that urfave/cli StringSlice flags can parse correctly.
 //
 // This custom implementation fixes a bug in urfave/cli-altsrc where TOML arrays
-// like ["heroku/compliance"] get converted to the literal string "[heroku/compliance]"
+// like ["yourcompany/compliance"] get converted to the literal string "[yourcompany/compliance]"
 // instead of being parsed as slice elements. See: https://github.com/urfave/cli-altsrc/issues/24
 //
 // Our solution uses a marshal/unmarshal technique to detect slice types and convert

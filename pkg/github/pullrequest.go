@@ -27,6 +27,42 @@ type PullRequest struct {
 	ghi    *github.Issue
 }
 
+// GetAuthor returns the PR author's login
+func (pr *PullRequest) GetAuthor() string {
+	if pr.ghi != nil && pr.ghi.User != nil {
+		return pr.ghi.User.GetLogin()
+	}
+	return ""
+}
+
+// GetLabels returns the PR's label names
+func (pr *PullRequest) GetLabels() []string {
+	if pr.ghi == nil {
+		return nil
+	}
+	labels := make([]string, 0, len(pr.ghi.Labels))
+	for _, label := range pr.ghi.Labels {
+		labels = append(labels, label.GetName())
+	}
+	return labels
+}
+
+// GetBody returns the PR description/body
+func (pr *PullRequest) GetBody() string {
+	if pr.ghi != nil {
+		return pr.ghi.GetBody()
+	}
+	return ""
+}
+
+// GetRequestedReviewers returns the requested reviewers for the PR
+// Note: This requires a separate API call as it's not included in the Issue object
+func (pr *PullRequest) GetRequestedReviewers(ctx context.Context) ([]string, error) {
+	// For now, return empty slice - can be implemented later with full PR fetch
+	// The AI can use the github_api tool to get this information if needed
+	return []string{}, nil
+}
+
 // LogValue implements slog.LogValuer for structured logging
 func (pr *PullRequest) LogValue() slog.Value {
 	return slog.GroupValue(
@@ -92,6 +128,8 @@ type AIAnalysis interface {
 	GetRecommendation() string
 	GetReasoning() string
 	GetRiskLevel() string
+	GetPRType() string
+	GetDocType() string
 }
 
 // GetCachedAIAnalysis retrieves cached AI analysis for this PR

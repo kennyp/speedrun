@@ -9,7 +9,7 @@
 # GitHub personal access token
 # token = "ghp_..." or "op://vault/GitHub/token"
 # Search query for finding PRs
-search_query = "is:open is:pr org:heroku label:on-call"
+search_query = "is:open is:pr org:yourcompany label:on-call"
 # Auto-merge behavior on PR approval: "true", "false", or "ask"
 auto_merge_on_approval = "ask"
 
@@ -28,7 +28,7 @@ tool_timeout = "90s"
 
 [checks]
 # CI checks to ignore when determining status
-ignored = ["heroku/compliance"]
+ignored = ["yourcompany/compliance"]
 # If specified, only these checks matter
 # required = []
 

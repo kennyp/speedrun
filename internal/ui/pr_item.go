@@ -46,7 +46,15 @@ func (i PRItem) Title() string {
 	} else if i.AIAnalysis != nil {
 		status = getRecommendationEmoji(i.AIAnalysis.Recommendation)
 	}
-	return fmt.Sprintf("%s PR #%d: %s", status, i.PR.Number, i.PR.Title)
+	
+	// Add PR type indicator to title for special types
+	title := fmt.Sprintf("%s PR #%d: %s", status, i.PR.Number, i.PR.Title)
+	if i.AIAnalysis != nil && i.AIAnalysis.PRType != "" && i.AIAnalysis.PRType != "CODE" {
+		typeEmoji := getPRTypeEmoji(i.AIAnalysis.PRType)
+		title = fmt.Sprintf("%s %s PR #%d: %s", status, typeEmoji, i.PR.Number, i.PR.Title)
+	}
+	
+	return title
 }
 
 // Description implements list.Item
@@ -108,7 +116,21 @@ func (i PRItem) Description() string {
 		}
 		emoji := getRecommendationEmoji(i.AIAnalysis.Recommendation)
 		riskEmoji := getRiskEmoji(i.AIAnalysis.RiskLevel)
-		desc += fmt.Sprintf("🤖 %s %s (%s %s Risk)", emoji, i.AIAnalysis.Recommendation, riskEmoji, i.AIAnalysis.RiskLevel)
+		typeEmoji := getPRTypeEmoji(i.AIAnalysis.PRType)
+		
+		// Build AI analysis string
+		aiDesc := fmt.Sprintf("🤖 %s %s (%s %s Risk)", emoji, i.AIAnalysis.Recommendation, riskEmoji, i.AIAnalysis.RiskLevel)
+		
+		// Add PR type if available
+		if i.AIAnalysis.PRType != "" {
+			aiDesc += fmt.Sprintf(" | %s %s", typeEmoji, i.AIAnalysis.PRType)
+			// Add doc type for documentation PRs
+			if i.AIAnalysis.PRType == "DOCUMENTATION" && i.AIAnalysis.DocType != "" {
+				aiDesc += fmt.Sprintf(" (%s)", i.AIAnalysis.DocType)
+			}
+		}
+		
+		desc += aiDesc
 	} else if i.LoadingAI {
 		if desc != "" {
 			desc += " | "
@@ -169,5 +191,20 @@ func getRiskEmoji(riskLevel string) string {
 		return "🔴"
 	default:
 		return "⚪"
+	}
+}
+
+func getPRTypeEmoji(prType string) string {
+	switch prType {
+	case "DOCUMENTATION":
+		return "📝"
+	case "CODE":
+		return "💻"
+	case "DEPENDENCY":
+		return "📦"
+	case "MIXED":
+		return "🔀"
+	default:
+		return "❓"
 	}
 }

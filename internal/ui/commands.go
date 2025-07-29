@@ -310,16 +310,20 @@ func FetchAIAnalysisCmd(aiAgent *agent.Agent, pr *github.PullRequest, diffStats 
 
 		// Build PR data
 		prData := agent.PRData{
-			Title:        pr.Title,
-			Number:       pr.Number,
-			Additions:    diffStats.Additions,
-			Deletions:    diffStats.Deletions,
-			ChangedFiles: diffStats.Files,
-			CIStatus:     checkStatus.State, // Keep for backward compatibility
-			CheckDetails: checkDetails,
-			Reviews:      agentReviews,
-			HasConflicts: false, // TODO: Fetch merge conflict status
-			PRURL:        fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.Number),
+			Title:              pr.Title,
+			Number:             pr.Number,
+			Author:             pr.GetAuthor(),
+			Labels:             pr.GetLabels(),
+			RequestedReviewers: []string{}, // TODO: Implement GetRequestedReviewers
+			Description:        pr.GetBody(),
+			Additions:          diffStats.Additions,
+			Deletions:          diffStats.Deletions,
+			ChangedFiles:       diffStats.Files,
+			CIStatus:           checkStatus.State, // Keep for backward compatibility
+			CheckDetails:       checkDetails,
+			Reviews:            agentReviews,
+			HasConflicts:       false, // TODO: Fetch merge conflict status
+			PRURL:              fmt.Sprintf("https://github.com/%s/%s/pull/%d", pr.Owner, pr.Repo, pr.Number),
 		}
 
 		slog.Debug("Running AI analysis (not cached)", slog.Any("pr", pr))
