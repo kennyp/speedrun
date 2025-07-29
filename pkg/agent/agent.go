@@ -117,16 +117,16 @@ func (a *Agent) AnalyzePR(ctx context.Context, prData PRData) (*Analysis, error)
 // executeConversation handles the conversation loop with tool calling support
 func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatCompletionMessageParamUnion) (string, error) {
 	const maxIterations = 10 // Prevent infinite loops
-	
+
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		slog.Debug("Executing conversation iteration", slog.Int("iteration", iteration))
-		
+
 		// Prepare chat completion parameters
 		params := openai.ChatCompletionNewParams{
 			Messages: messages,
 			Model:    a.model,
 		}
-		
+
 		// Add tools if available
 		if a.toolRegistry != nil {
 			tools := a.toolRegistry.GetOpenAITools()
@@ -152,17 +152,17 @@ func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatC
 		}
 
 		choice := response.Choices[0]
-		
+
 		// Check if the assistant wants to use tools
-		if choice.Message.ToolCalls != nil && len(choice.Message.ToolCalls) > 0 {
+		if len(choice.Message.ToolCalls) > 0 {
 			slog.Debug("Processing tool calls", slog.Int("count", len(choice.Message.ToolCalls)))
-			
+
 			// Create assistant message with tool calls
 			var assistant openai.ChatCompletionAssistantMessageParam
 			if choice.Message.Content != "" {
 				assistant.Content.OfString = param.NewOpt(choice.Message.Content)
 			}
-			
+
 			// Convert tool calls to the parameter format
 			assistant.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(choice.Message.ToolCalls))
 			for i, toolCall := range choice.Message.ToolCalls {
@@ -175,9 +175,9 @@ func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatC
 					},
 				}
 			}
-			
+
 			messages = append(messages, openai.ChatCompletionMessageParamUnion{OfAssistant: &assistant})
-			
+
 			// Execute tool calls
 			for _, toolCall := range choice.Message.ToolCalls {
 				result, err := a.executeToolCall(ctx, toolCall)
@@ -185,20 +185,19 @@ func (a *Agent) executeConversation(ctx context.Context, messages []openai.ChatC
 					slog.Error("Tool call failed", slog.String("tool", toolCall.Function.Name), slog.Any("error", err))
 					result = fmt.Sprintf("Error: %v", err)
 				}
-				
+
 				// Add tool result to conversation
 				messages = append(messages, openai.ToolMessage(result, toolCall.ID))
 			}
-			
+
 			// Continue the conversation to get the final response
 			continue
 		}
-		
-		// No tool calls, add regular assistant message and return
-		messages = append(messages, openai.AssistantMessage(choice.Message.Content))
+
+		// No tool calls, return final response
 		return choice.Message.Content, nil
 	}
-	
+
 	return "", fmt.Errorf("conversation exceeded maximum iterations (%d)", maxIterations)
 }
 
@@ -207,25 +206,25 @@ func (a *Agent) executeToolCall(ctx context.Context, toolCall openai.ChatComplet
 	if a.toolRegistry == nil {
 		return "", fmt.Errorf("no tool registry available")
 	}
-	
+
 	tool, exists := a.toolRegistry.Get(toolCall.Function.Name)
 	if !exists {
 		return "", fmt.Errorf("unknown tool: %s", toolCall.Function.Name)
 	}
-	
+
 	slog.Debug("Executing tool", slog.String("name", toolCall.Function.Name), slog.String("args", toolCall.Function.Arguments))
-	
+
 	// Parse arguments as JSON
 	var args json.RawMessage
 	if err := json.Unmarshal([]byte(toolCall.Function.Arguments), &args); err != nil {
 		return "", fmt.Errorf("invalid tool arguments: %w", err)
 	}
-	
+
 	// Create a new context with a configurable timeout for tool execution
 	// This should be longer than the GitHub backoff MaxElapsedTime (60s) to allow retries
 	toolCtx, cancel := context.WithTimeout(context.Background(), a.toolTimeout)
 	defer cancel()
-	
+
 	// Execute the tool with the dedicated context
 	return tool.Execute(toolCtx, args)
 }

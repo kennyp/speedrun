@@ -53,6 +53,7 @@ test: test-static test-lint test-unit
 # Run lint checks `package:"packages to test, empty for all"`
 [group("test")]
 @test-lint +package="./...":
+    just step_prefix="Formatting Go Code" step go fmt ./...
     just step_prefix="Linting Go Code" step {{ golangci-lint }} run ./cmd/... ./internal/... ./pkg/...
     just step_prefix="Checking Modernize" step go run {{ modernize }} -test -fix $(go list {{ package }} | grep -v '/reference/')
 

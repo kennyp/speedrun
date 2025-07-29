@@ -14,14 +14,14 @@ func Get() string {
 	if Version != "dev" {
 		return formatVersion(Version)
 	}
-	
+
 	// Try to get version info from build info (works with go install)
 	if info, ok := debug.ReadBuildInfo(); ok {
 		// Check if we have version info from go install
 		if info.Main.Version != "" && info.Main.Version != "(devel)" {
 			return info.Main.Version
 		}
-		
+
 		// Look for vcs.revision in build settings
 		var revision string
 		var modified bool
@@ -33,7 +33,7 @@ func Get() string {
 				modified = setting.Value == "true"
 			}
 		}
-		
+
 		if revision != "" {
 			// Try to get the tag info if available
 			if tag := getLatestTag(); tag != "" {
@@ -51,7 +51,7 @@ func Get() string {
 			return result
 		}
 	}
-	
+
 	// Final fallback: try to detect version from git at runtime
 	return detectGitVersion()
 }
@@ -73,7 +73,7 @@ func detectGitVersion() string {
 	if err != nil {
 		return "dev"
 	}
-	
+
 	return formatVersion(strings.TrimSpace(string(output)))
 }
 
@@ -84,10 +84,10 @@ func formatVersion(gitDescribe string) string {
 	if dirty {
 		gitDescribe = strings.TrimSuffix(gitDescribe, "-dirty")
 	}
-	
+
 	// Split on hyphens to parse git describe output
 	parts := strings.Split(gitDescribe, "-")
-	
+
 	switch len(parts) {
 	case 1:
 		// Just a tag (e.g., "v0.1.0") or just a commit hash
@@ -96,21 +96,19 @@ func formatVersion(gitDescribe string) string {
 			result += "(dirty)"
 		}
 		return result
-		
+
 	case 3:
 		// Full git describe format: tag-count-ghash (e.g., "v0.1.0-3-gafaf234")
 		tag := parts[0]
 		commitHash := parts[2]
 		// Remove the 'g' prefix from commit hash
-		if strings.HasPrefix(commitHash, "g") {
-			commitHash = commitHash[1:]
-		}
+		commitHash = strings.TrimPrefix(commitHash, "g")
 		result := tag + "-" + commitHash
 		if dirty {
 			result += "(dirty)"
 		}
 		return result
-		
+
 	default:
 		// Fallback: return as-is with dirty suffix if applicable
 		result := gitDescribe

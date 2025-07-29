@@ -186,7 +186,7 @@ func newPullRequestFromIssue(ctx context.Context, client *Client, issue *github.
 	// This ensures AI cache keys are available from the start
 	slog.Debug("Fetching HeadSHA during PR creation", slog.Any("pr", pr))
 	start := time.Now()
-	
+
 	var prDetails *github.PullRequest
 	operation := func() error {
 		var getErr error
@@ -224,20 +224,20 @@ func (pr *PullRequest) GetReviews(ctx context.Context) ([]*Review, error) {
 	// Try to get from cache first
 	var cachedReviews []*Review
 	if err := pr.client.cache.Get(cacheKey, &cachedReviews); err == nil {
-			// Validate cached data - if it's nil, delete the bad cache entry and fetch fresh
-			if cachedReviews != nil {
-				duration := time.Since(start)
-				slog.Debug("Retrieved reviews from cache", slog.Any("pr", pr), slog.Int("count", len(cachedReviews)), slog.Duration("duration", duration))
-				return cachedReviews, nil
-			} else {
-				// Bad cached data (nil) - delete it and fetch fresh
-				slog.Debug("Deleting invalid cached reviews (nil)", slog.Any("pr", pr))
-				if err := pr.client.cache.Delete(cacheKey); err != nil {
-					slog.Debug("Failed to delete invalid reviews cache", slog.Any("error", err))
-				}
-				// Fall through to fresh API call
+		// Validate cached data - if it's nil, delete the bad cache entry and fetch fresh
+		if cachedReviews != nil {
+			duration := time.Since(start)
+			slog.Debug("Retrieved reviews from cache", slog.Any("pr", pr), slog.Int("count", len(cachedReviews)), slog.Duration("duration", duration))
+			return cachedReviews, nil
+		} else {
+			// Bad cached data (nil) - delete it and fetch fresh
+			slog.Debug("Deleting invalid cached reviews (nil)", slog.Any("pr", pr))
+			if err := pr.client.cache.Delete(cacheKey); err != nil {
+				slog.Debug("Failed to delete invalid reviews cache", slog.Any("error", err))
 			}
+			// Fall through to fresh API call
 		}
+	}
 
 	var reviews []*github.PullRequestReview
 	operation := func() error {
@@ -305,40 +305,40 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	// Try to get from cache first
 	var cachedStatus *CheckStatus
 	if err := pr.client.cache.Get(cacheKey, &cachedStatus); err == nil {
-			// Validate cached data - if it's nil or has invalid state, delete and fetch fresh
-			if cachedStatus != nil && cachedStatus.State != "" && cachedStatus.Description != "" {
-				duration := time.Since(start)
-				slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
+		// Validate cached data - if it's nil or has invalid state, delete and fetch fresh
+		if cachedStatus != nil && cachedStatus.State != "" && cachedStatus.Description != "" {
+			duration := time.Since(start)
+			slog.Debug("Retrieved check status from cache", slog.Any("pr", pr), slog.Any("status", cachedStatus), slog.Duration("duration", duration))
 
-				// If HeadSHA is not populated, we still need to fetch PR details to get it
-				if pr.HeadSHA == "" {
-					slog.Debug("HeadSHA not available, fetching PR details", slog.Any("pr", pr))
-					var prDetails *github.PullRequest
-					operation := func() error {
-						var getErr error
-						prDetails, _, getErr = pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
-						return getErr
-					}
-
-					exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
-					if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err == nil {
-						pr.HeadSHA = prDetails.GetHead().GetSHA()
-						slog.Debug("Retrieved PR details for HeadSHA", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA))
-					} else {
-						slog.Debug("Failed to get PR details for HeadSHA", slog.Any("pr", pr), slog.Any("error", err))
-					}
+			// If HeadSHA is not populated, we still need to fetch PR details to get it
+			if pr.HeadSHA == "" {
+				slog.Debug("HeadSHA not available, fetching PR details", slog.Any("pr", pr))
+				var prDetails *github.PullRequest
+				operation := func() error {
+					var getErr error
+					prDetails, _, getErr = pr.client.client.PullRequests.Get(ctx, pr.Owner, pr.Repo, pr.Number)
+					return getErr
 				}
 
-				return cachedStatus, nil
-			} else {
-				// Bad cached data (nil or invalid state/description) - delete it and fetch fresh
-				slog.Debug("Deleting invalid cached check status", slog.Any("pr", pr), slog.Any("status", cachedStatus))
-				if err := pr.client.cache.Delete(cacheKey); err != nil {
-					slog.Debug("Failed to delete invalid check status cache", slog.Any("error", err))
+				exponentialBackoff := pr.client.backoffConfig.ToExponentialBackoff()
+				if err := backoff.Retry(operation, backoff.WithContext(exponentialBackoff, ctx)); err == nil {
+					pr.HeadSHA = prDetails.GetHead().GetSHA()
+					slog.Debug("Retrieved PR details for HeadSHA", slog.Any("pr", pr), slog.String("head_sha", pr.HeadSHA))
+				} else {
+					slog.Debug("Failed to get PR details for HeadSHA", slog.Any("pr", pr), slog.Any("error", err))
 				}
-				// Fall through to fresh API call
 			}
+
+			return cachedStatus, nil
+		} else {
+			// Bad cached data (nil or invalid state/description) - delete it and fetch fresh
+			slog.Debug("Deleting invalid cached check status", slog.Any("pr", pr), slog.Any("status", cachedStatus))
+			if err := pr.client.cache.Delete(cacheKey); err != nil {
+				slog.Debug("Failed to delete invalid check status cache", slog.Any("error", err))
+			}
+			// Fall through to fresh API call
 		}
+	}
 
 	// Get the PR details first to get the head SHA
 	var prDetails *github.PullRequest
@@ -414,16 +414,23 @@ func (pr *PullRequest) GetCheckStatus(ctx context.Context) (*CheckStatus, error)
 	}
 
 	// Apply check filtering based on configuration
-	filteredDetails := pr.client.filterChecks(status.Details)
+	var filteredDetails []CheckDetail
+	if status.Details != nil {
+		filteredDetails = pr.client.filterChecks(status.Details)
+	}
 
 	// Determine overall status
+	//nolint:staticcheck // status is never nil, initialized above
 	status.State = aggregateCheckStates(filteredDetails)
+	//nolint:staticcheck // status is never nil, initialized above
 	status.Description = formatCheckDescription(filteredDetails)
+	//nolint:staticcheck // status is never nil, initialized above
 	status.Details = filteredDetails
 
 	slog.Debug("GitHub API get check status completed", slog.Any("pr", pr), slog.Any("status", status), slog.Duration("duration", time.Since(start)))
 
 	// Cache the results - only cache valid status (not nil and has state/description)
+	//nolint:staticcheck // status is never nil, initialized above
 	if status != nil && status.State != "" && status.Description != "" {
 		if err := pr.client.cache.Set(cacheKey, status); err != nil {
 			slog.Debug("Failed to cache check status", slog.Any("error", err))
@@ -447,20 +454,20 @@ func (pr *PullRequest) GetDiffStats(ctx context.Context) (*DiffStats, error) {
 	// Try to get from cache first
 	var cachedStats *DiffStats
 	if err := pr.client.cache.Get(cacheKey, &cachedStats); err == nil {
-			// Validate cached data - if it's nil or has invalid values, delete and fetch fresh
-			if cachedStats != nil && cachedStats.Additions >= 0 && cachedStats.Deletions >= 0 && cachedStats.Files >= 0 {
-				duration := time.Since(start)
-				slog.Debug("Retrieved diff stats from cache", slog.Any("pr", pr), slog.Any("stats", cachedStats), slog.Duration("duration", duration))
-				return cachedStats, nil
-			} else {
-				// Bad cached data (nil or invalid values) - delete it and fetch fresh
-				slog.Debug("Deleting invalid cached diff stats", slog.Any("pr", pr), slog.Any("stats", cachedStats))
-				if err := pr.client.cache.Delete(cacheKey); err != nil {
-					slog.Debug("Failed to delete invalid diff stats cache", slog.Any("error", err))
-				}
-				// Fall through to fresh API call
+		// Validate cached data - if it's nil or has invalid values, delete and fetch fresh
+		if cachedStats != nil && cachedStats.Additions >= 0 && cachedStats.Deletions >= 0 && cachedStats.Files >= 0 {
+			duration := time.Since(start)
+			slog.Debug("Retrieved diff stats from cache", slog.Any("pr", pr), slog.Any("stats", cachedStats), slog.Duration("duration", duration))
+			return cachedStats, nil
+		} else {
+			// Bad cached data (nil or invalid values) - delete it and fetch fresh
+			slog.Debug("Deleting invalid cached diff stats", slog.Any("pr", pr), slog.Any("stats", cachedStats))
+			if err := pr.client.cache.Delete(cacheKey); err != nil {
+				slog.Debug("Failed to delete invalid diff stats cache", slog.Any("error", err))
 			}
+			// Fall through to fresh API call
 		}
+	}
 
 	var prDetails *github.PullRequest
 	operation := func() error {

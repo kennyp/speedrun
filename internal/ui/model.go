@@ -47,7 +47,7 @@ var nextPRID atomic.Int64
 
 // PR type detection keywords
 var (
-	dependencyKeywords = []string{"bump ", "update ", "upgrade ", "dependencies", "snyk", "dependabot"}
+	dependencyKeywords    = []string{"bump ", "update ", "upgrade ", "dependencies", "snyk", "dependabot"}
 	documentationKeywords = []string{"readme", "doc", "documentation", "guide", "rfc"}
 )
 
@@ -122,7 +122,6 @@ type Model struct {
 
 	// Advanced filter dialog state
 	showAdvancedFilter bool
-	filterText         string
 	filterReviewStatus string // "all", "reviewed", "unreviewed"
 	filterRepo         string
 	filterType         string // "all", "docs", "code", "dependencies", "mixed"
@@ -193,8 +192,8 @@ type CombinedKeyMap struct {
 // of the key.Map interface.
 func (k CombinedKeyMap) ShortHelp() []key.Binding {
 	return []key.Binding{
-		k.ListKeys.CursorUp, k.ListKeys.CursorDown, 
-		k.SpeedrunKeys.Approve, k.SpeedrunKeys.View, k.SpeedrunKeys.AutoMerge, k.SpeedrunKeys.Details, 
+		k.ListKeys.CursorUp, k.ListKeys.CursorDown,
+		k.SpeedrunKeys.Approve, k.SpeedrunKeys.View, k.SpeedrunKeys.AutoMerge, k.SpeedrunKeys.Details,
 		k.SpeedrunKeys.Filter, k.SpeedrunKeys.Help, k.SpeedrunKeys.Quit,
 	}
 }
@@ -203,11 +202,11 @@ func (k CombinedKeyMap) ShortHelp() []key.Binding {
 // key.Map interface.
 func (k CombinedKeyMap) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{k.ListKeys.CursorUp, k.ListKeys.CursorDown, k.ListKeys.PrevPage, k.ListKeys.NextPage}, // Navigation
-		{k.ListKeys.GoToStart, k.ListKeys.GoToEnd},                                              // Navigation (jump)
+		{k.ListKeys.CursorUp, k.ListKeys.CursorDown, k.ListKeys.PrevPage, k.ListKeys.NextPage},          // Navigation
+		{k.ListKeys.GoToStart, k.ListKeys.GoToEnd},                                                      // Navigation (jump)
 		{k.SpeedrunKeys.Approve, k.SpeedrunKeys.View, k.SpeedrunKeys.AutoMerge, k.SpeedrunKeys.Details}, // Actions
-		{k.SpeedrunKeys.Filter, k.SpeedrunKeys.FilterAdvanced, k.SpeedrunKeys.Refresh},          // Filtering & Refresh
-		{k.SpeedrunKeys.Help, k.SpeedrunKeys.Quit},                                              // Other
+		{k.SpeedrunKeys.Filter, k.SpeedrunKeys.FilterAdvanced, k.SpeedrunKeys.Refresh},                  // Filtering & Refresh
+		{k.SpeedrunKeys.Help, k.SpeedrunKeys.Quit},                                                      // Other
 	}
 }
 
@@ -246,7 +245,7 @@ func NewModel(ctx context.Context, cfg *config.Config, githubClient *github.Clie
 		help:               h,
 		keys:               speedrunKeys,
 		loadingPRs:         true,
-		showOnlyUnreviewed: true, // Default to showing only unreviewed PRs
+		showOnlyUnreviewed: true,         // Default to showing only unreviewed PRs
 		filterReviewStatus: "unreviewed", // Default filter
 		filterType:         "all",
 		filterRepo:         "all",
@@ -926,7 +925,6 @@ func (m Model) handleApprove() (Model, tea.Cmd) {
 	return m, ApprovePRCmd(prItem.PR, prItem.ID)
 }
 
-
 func (m Model) handleView() (Model, tea.Cmd) {
 	selected := m.list.SelectedItem()
 	if selected == nil {
@@ -1020,13 +1018,13 @@ func (m Model) handleRefresh() (Model, tea.Cmd) {
 func (m Model) handleFilter() (Model, tea.Cmd) {
 	// Check if advanced filters are active (non-default values)
 	advancedFiltersActive := m.filterType != "all" || m.filterRepo != "all"
-	
-	slog.Info("User pressed f key", 
+
+	slog.Info("User pressed f key",
 		slog.Bool("advanced_filters_active", advancedFiltersActive),
 		slog.String("current_review_status", m.filterReviewStatus),
 		slog.String("current_type", m.filterType),
 		slog.String("current_repo", m.filterRepo))
-	
+
 	if advancedFiltersActive {
 		// When advanced filters are active, cycle through review status options
 		oldReviewStatus := m.filterReviewStatus
@@ -1038,14 +1036,14 @@ func (m Model) handleFilter() (Model, tea.Cmd) {
 		case "reviewed":
 			m.filterReviewStatus = "all"
 		}
-		
-		slog.Info("Advanced filter mode: cycled review status", 
+
+		slog.Info("Advanced filter mode: cycled review status",
 			slog.String("from", oldReviewStatus),
 			slog.String("to", m.filterReviewStatus))
-		
+
 		// Update legacy flag for consistency
 		m.showOnlyUnreviewed = (m.filterReviewStatus == "unreviewed")
-		
+
 		m.status = fmt.Sprintf("Review filter: %s (advanced filters active - use F to modify)", m.filterReviewStatus)
 	} else {
 		// Simple toggle when no advanced filters are active
@@ -1058,11 +1056,11 @@ func (m Model) handleFilter() (Model, tea.Cmd) {
 		} else {
 			m.filterReviewStatus = "all"
 		}
-		
-		slog.Info("Simple filter mode: toggled review filter", 
+
+		slog.Info("Simple filter mode: toggled review filter",
 			slog.Bool("from", oldFilter),
 			slog.Bool("to", m.showOnlyUnreviewed))
-		
+
 		// Update status message
 		filterStatus := "all"
 		if m.showOnlyUnreviewed {
@@ -1074,19 +1072,19 @@ func (m Model) handleFilter() (Model, tea.Cmd) {
 	// Update visible items based on new filter state (don't preserve selection for user-initiated filter)
 	m = m.updateVisibleItemsWithPreserveSelection(false)
 
-	slog.Info("Filter applied", 
+	slog.Info("Filter applied",
 		slog.String("review_filter", m.filterReviewStatus),
 		slog.String("type_filter", m.filterType),
 		slog.String("repo_filter", m.filterRepo),
 		slog.Bool("advanced_active", advancedFiltersActive),
-		slog.Int("visible_items", len(m.list.Items())), 
+		slog.Int("visible_items", len(m.list.Items())),
 		slog.Int("total_items", len(m.items)))
 
 	return m, nil
 }
 
 func (m Model) handleFilterAdvanced() (Model, tea.Cmd) {
-	slog.Info("User opened advanced filter dialog", 
+	slog.Info("User opened advanced filter dialog",
 		slog.String("current_review_status", m.filterReviewStatus),
 		slog.String("current_type", m.filterType),
 		slog.String("current_repo", m.filterRepo))
@@ -1101,36 +1099,36 @@ func (m Model) handleHelp() (Model, tea.Cmd) {
 }
 
 func (m Model) applyAdvancedFilters() Model {
-	slog.Debug("Applying advanced filters", 
+	slog.Debug("Applying advanced filters",
 		slog.String("review_status", m.filterReviewStatus),
 		slog.String("type", m.filterType),
 		slog.String("repo", m.filterRepo))
-	
+
 	// Update the legacy filter state to match advanced filter
 	m.showOnlyUnreviewed = (m.filterReviewStatus == "unreviewed")
-	
+
 	// Update visible items based on new filter state
 	slog.Debug("About to update visible items for advanced filters")
 	m = m.updateVisibleItemsWithPreserveSelection(false)
 	slog.Debug("Updated visible items for advanced filters", slog.Int("visible_count", len(m.list.Items())))
-	
+
 	// Update status message with active filters
 	statusParts := []string{}
-	
+
 	if m.filterReviewStatus != "all" {
 		statusParts = append(statusParts, m.filterReviewStatus+" PRs")
 	} else {
 		statusParts = append(statusParts, "all PRs")
 	}
-	
+
 	if m.filterType != "all" {
 		statusParts = append(statusParts, m.filterType+" changes")
 	}
-	
+
 	if m.filterRepo != "all" {
 		statusParts = append(statusParts, m.filterRepo+" repo")
 	}
-	
+
 	if len(statusParts) > 1 {
 		m.status = fmt.Sprintf("Showing %s", strings.Join(statusParts, ", "))
 	} else if len(statusParts) == 1 {
@@ -1138,14 +1136,14 @@ func (m Model) applyAdvancedFilters() Model {
 	} else {
 		m.status = "Showing all PRs"
 	}
-	
-	slog.Info("Advanced filters applied", 
+
+	slog.Info("Advanced filters applied",
 		slog.String("review_status", m.filterReviewStatus),
 		slog.String("type", m.filterType),
 		slog.String("repo", m.filterRepo),
-		slog.Int("visible_items", len(m.list.Items())), 
+		slog.Int("visible_items", len(m.list.Items())),
 		slog.Int("total_items", len(m.items)))
-	
+
 	return m
 }
 
@@ -1161,7 +1159,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 
 	start := time.Now()
 
-	slog.Debug("Starting filter operation", 
+	slog.Debug("Starting filter operation",
 		slog.String("review_status_filter", m.filterReviewStatus),
 		slog.String("type_filter", m.filterType),
 		slog.String("repo_filter", m.filterRepo),
@@ -1203,7 +1201,8 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 		}
 
 		// Apply review status filter
-		if m.filterReviewStatus == "unreviewed" {
+		switch m.filterReviewStatus {
+		case "unreviewed":
 			// Show PR if:
 			// - Not reviewed AND not approved yet, OR
 			// - Review was dismissed (needs re-review), OR
@@ -1211,7 +1210,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 			// - It's the currently selected PR (prevent jarring disappearance)
 			shouldShow = shouldShow && ((!item.Reviewed && !item.Approved) || item.Dismissed || item.LoadingReviews ||
 				(selectedPRNumber > 0 && item.PR.Number == selectedPRNumber))
-		} else if m.filterReviewStatus == "reviewed" {
+		case "reviewed":
 			// Show only reviewed PRs (approved or other review states)
 			shouldShow = shouldShow && (item.Reviewed || item.Approved)
 		}
@@ -1223,7 +1222,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 			matchesType := (prType == m.filterType)
 			if !matchesType {
 				typeFilteredCount++
-				slog.Debug("PR filtered out by type", 
+				slog.Debug("PR filtered out by type",
 					slog.Int("pr_number", item.PR.Number),
 					slog.String("pr_title", item.PR.Title),
 					slog.String("detected_type", prType),
@@ -1232,13 +1231,13 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 			shouldShow = shouldShow && matchesType
 		}
 
-		// Apply repository filter  
+		// Apply repository filter
 		if shouldShow && m.filterRepo != "all" {
 			if m.filterRepo == "current" {
 				// For now, show all repos since we don't have a "current" repo concept
 				// TODO: Implement current repo detection
 				repoFilteredCount++ // Count as filtered for now
-				slog.Debug("PR would be filtered by repo (not implemented)", 
+				slog.Debug("PR would be filtered by repo (not implemented)",
 					slog.Int("pr_number", item.PR.Number),
 					slog.String("repo", item.PR.Owner+"/"+item.PR.Repo))
 				shouldShow = true // Keep all for now
@@ -1249,7 +1248,7 @@ func (m Model) updateVisibleItemsWithPreserveSelection(preserveSelection bool) M
 			visibleItems = append(visibleItems, item)
 		} else {
 			filteredCount++
-			slog.Debug("PR filtered out", 
+			slog.Debug("PR filtered out",
 				slog.Int("pr_number", item.PR.Number),
 				slog.String("pr_title", item.PR.Title),
 				slog.Bool("reviewed", item.Reviewed),
@@ -1293,7 +1292,7 @@ func (m Model) determinePRType(item PRItem) string {
 
 	// Analyze PR title and content for type hints
 	title := strings.ToLower(item.PR.Title)
-	
+
 	// Check for dependency updates in title
 	if slices.ContainsFunc(dependencyKeywords, func(keyword string) bool {
 		return strings.Contains(title, keyword)
@@ -1301,7 +1300,7 @@ func (m Model) determinePRType(item PRItem) string {
 		slog.Debug("PR type detection: detected dependencies from title", slog.String("title", item.PR.Title))
 		return "dependencies"
 	}
-	
+
 	// Check for documentation keywords in title
 	if slices.ContainsFunc(documentationKeywords, func(keyword string) bool {
 		return strings.Contains(title, keyword)
@@ -1309,28 +1308,28 @@ func (m Model) determinePRType(item PRItem) string {
 		slog.Debug("PR type detection: detected docs from title", slog.String("title", item.PR.Title))
 		return "docs"
 	}
-	
+
 	// Use file count and change size as heuristics
 	// Small changes with few files often indicate docs or config
-	if item.DiffStats.Files <= 2 && item.DiffStats.Additions + item.DiffStats.Deletions < 100 {
-		slog.Debug("PR type detection: small change, assuming docs", 
-			slog.Int("files", item.DiffStats.Files), 
-			slog.Int("total_changes", item.DiffStats.Additions + item.DiffStats.Deletions))
+	if item.DiffStats.Files <= 2 && item.DiffStats.Additions+item.DiffStats.Deletions < 100 {
+		slog.Debug("PR type detection: small change, assuming docs",
+			slog.Int("files", item.DiffStats.Files),
+			slog.Int("total_changes", item.DiffStats.Additions+item.DiffStats.Deletions))
 		return "docs"
 	}
-	
+
 	// Large changes with many files suggest mixed or significant code changes
-	if item.DiffStats.Files > 20 || item.DiffStats.Additions + item.DiffStats.Deletions > 1000 {
-		slog.Debug("PR type detection: large change, assuming mixed", 
-			slog.Int("files", item.DiffStats.Files), 
-			slog.Int("total_changes", item.DiffStats.Additions + item.DiffStats.Deletions))
+	if item.DiffStats.Files > 20 || item.DiffStats.Additions+item.DiffStats.Deletions > 1000 {
+		slog.Debug("PR type detection: large change, assuming mixed",
+			slog.Int("files", item.DiffStats.Files),
+			slog.Int("total_changes", item.DiffStats.Additions+item.DiffStats.Deletions))
 		return "mixed"
 	}
-	
+
 	// Medium-sized changes default to code
-	slog.Debug("PR type detection: medium change, assuming code", 
-		slog.Int("files", item.DiffStats.Files), 
-		slog.Int("total_changes", item.DiffStats.Additions + item.DiffStats.Deletions))
+	slog.Debug("PR type detection: medium change, assuming code",
+		slog.Int("files", item.DiffStats.Files),
+		slog.Int("total_changes", item.DiffStats.Additions+item.DiffStats.Deletions))
 	return "code"
 }
 
@@ -1519,19 +1518,19 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 	// Create dialog content
 	var content strings.Builder
 	content.WriteString("Advanced Filter Options\n\n")
-	
+
 	// Review Status Section
 	content.WriteString("Review Status:\n")
 	reviewOptions := []struct {
-		key    string
-		value  string
-		label  string
+		key   string
+		value string
+		label string
 	}{
 		{"1", "all", "All PRs"},
 		{"2", "unreviewed", "Unreviewed PRs"},
 		{"3", "reviewed", "Reviewed PRs"},
 	}
-	
+
 	for _, option := range reviewOptions {
 		indicator := "○ "
 		if m.filterReviewStatus == option.value {
@@ -1539,15 +1538,15 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 		}
 		content.WriteString(fmt.Sprintf("  %s%s %s\n", indicator, option.key, option.label))
 	}
-	
+
 	content.WriteString("\n")
-	
+
 	// PR Type Section
 	content.WriteString("PR Type:\n")
 	typeOptions := []struct {
-		key    string
-		value  string
-		label  string
+		key   string
+		value string
+		label string
 	}{
 		{"4", "all", "All types"},
 		{"5", "docs", "Documentation"},
@@ -1555,7 +1554,7 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 		{"7", "dependencies", "Dependencies"},
 		{"8", "mixed", "Mixed changes"},
 	}
-	
+
 	for _, option := range typeOptions {
 		indicator := "○ "
 		if m.filterType == option.value {
@@ -1563,12 +1562,12 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 		}
 		content.WriteString(fmt.Sprintf("  %s%s %s\n", indicator, option.key, option.label))
 	}
-	
+
 	content.WriteString("\n")
-	
+
 	// Repository Filter Section
 	content.WriteString("Repository Filter:\n")
-	repoOptions := []struct{
+	repoOptions := []struct {
 		key   string
 		value string
 		label string
@@ -1576,7 +1575,7 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 		{"9", "all", "All repositories"},
 		{"0", "current", "Current repository only"},
 	}
-	
+
 	for _, option := range repoOptions {
 		indicator := "○ "
 		if m.filterRepo == option.value {
@@ -1584,7 +1583,7 @@ func (m Model) renderAdvancedFilterDialog(baseView string) string {
 		}
 		content.WriteString(fmt.Sprintf("  %s%s %s\n", indicator, option.key, option.label))
 	}
-	
+
 	content.WriteString("\nPress Enter to apply filters or Esc to cancel")
 
 	// Create dialog border style
