@@ -103,8 +103,9 @@ step *command:
 _build source target="":
     target_name="{{ if target == "" { source } else { target } }}"
     target_path="{{ bins }}/${target_name}"
-    source_path="{{ join(cmds, source) }}"
-    just step_prefix="Building ${target_name}" step go build -o "${target_path}" "${source_path}"
+    source_path="cmd/{{ source }}"
+    version=$(git describe --tags --always --dirty 2>/dev/null || echo "dev")
+    just step_prefix="Building ${target_name}" step "go build -ldflags \"-X github.com/kennyp/speedrun/pkg/version.Version=${version}\" -o \"${target_path}\" \"./${source_path}\"" 
     just step_prefix="Signing ${target_name}" step just sign "${target_path}"
 
 [private]
